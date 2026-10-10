@@ -45,6 +45,7 @@ pub fn run() {
             // == lsp ==
             // == claude ==
             // == remote ==
+            remote::ssh::remote_hosts,
             // == daemons ==
         ])
         .build(tauri::generate_context!())
@@ -53,6 +54,7 @@ pub fn run() {
             // Kill every tracked child (pty, ssh, LSP, claude) when the app exits.
             if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
                 procs::kill_all();
+                remote::ssh::close_all();
             }
         });
 }
