@@ -36,6 +36,7 @@ pub fn run() {
             fs::fs_delete,
             fs::fs_create_dir,
             fs::fs_home,
+            location::launch_location,
             fs::watch::fs_watch,
             fs::watch::fs_unwatch,
             procs::procs_list,

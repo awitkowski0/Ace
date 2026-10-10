@@ -54,6 +54,7 @@ export const fs = {
   delete: (loc: Location) => invoke<void>("fs_delete", { loc }),
   createDir: (loc: Location) => invoke<void>("fs_create_dir", { loc }),
   home: () => invoke<string>("fs_home"),
+  launchLocation: () => invoke<Location | null>("launch_location"),
   watch: (loc: Location) => invoke<void>("fs_watch", { loc }),
   unwatch: (loc: Location) => invoke<void>("fs_unwatch", { loc }),
   onChanged: (cb: (e: FsChanged) => void) => listen<FsChanged>("fs://changed", (e) => cb(e.payload)),

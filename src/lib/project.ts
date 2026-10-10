@@ -71,6 +71,12 @@ let inited = false;
 export async function initProject() {
   if (inited) return;
   inited = true;
+  const arg = await fs.launchLocation().catch(() => null);
+  if (arg) {
+    await openProject(arg);
+    projectStore.set({ ready: true });
+    return;
+  }
   const { recent } = projectStore.get();
   for (const r of recent) {
     const st = await Promise.race([
