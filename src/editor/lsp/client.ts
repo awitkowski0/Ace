@@ -68,7 +68,7 @@ export class LspClient {
   async initialize(rootPath: string, rootUri: string, name: string, initOptions?: Json) {
     const res = await this.request("initialize", {
       processId: null,
-      clientInfo: { name: "Atelier" },
+      clientInfo: { name: "Ace" },
       rootUri,
       rootPath,
       workspaceFolders: [{ uri: rootUri, name }],

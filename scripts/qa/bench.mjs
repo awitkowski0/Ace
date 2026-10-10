@@ -141,7 +141,7 @@ await app.stop();
 
 // ---- sizes ----
 const du = (p) => (fs.existsSync(p) ? +sh(`du -sk ${JSON.stringify(p)} | cut -f1`) : null);
-const bundleApp = path.join(repo, "src-tauri/target/release/bundle/macos/Atelier.app");
+const bundleApp = path.join(repo, "src-tauri/target/release/bundle/macos/Ace.app");
 res.sizes = { binaryMB: r1(fs.statSync(BIN).size / 1048576), distMB: r1(du(path.join(repo, "dist")) / 1024), bundleAppMB: du(bundleApp) ? r1(du(bundleApp) / 1024) : null, monacoChunkMB: r1(sh(`ls -l ${repo}/dist/assets/monacoSetup-*.js | awk '{print $5}'`) / 1048576) };
 
 res.gitClean = sh(`git -C ${JSON.stringify(proj)} status --porcelain`) === before;

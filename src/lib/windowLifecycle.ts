@@ -13,7 +13,7 @@ export async function confirmWindowClose(reason: "close" | "quit" | "switch" = "
   await windows.focus(myLabel()).catch(() => {}); // the prompt must be visible (this may be a background tab)
   const { choiceDialog } = await import("../components/shell/dialogs");
   const names = dirty.slice(0, 8).map((d) => d.name).join("\n") + (dirty.length > 8 ? `\n… and ${dirty.length - 8} more` : "");
-  const what = reason === "quit" ? "Quit Atelier" : reason === "switch" ? "Switch project" : "Close project";
+  const what = reason === "quit" ? "Quit Ace" : reason === "switch" ? "Switch project" : "Close project";
   const r = await choiceDialog({
     title: `${what}: unsaved changes`,
     message: `${dirty.length} file${dirty.length > 1 ? "s have" : " has"} unsaved changes:\n${names}`,

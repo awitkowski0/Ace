@@ -101,7 +101,7 @@ pub fn norm(l: &Location) -> Location {
 
 pub fn project_title(l: Option<&Location>) -> String {
     match l {
-        None => "Atelier".into(),
+        None => "Ace".into(),
         Some(l) => {
             let name = l.path.trim_end_matches('/').rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(&l.path).to_string();
             if l.is_local() { name } else { format!("{name} \u{2014} {}", l.host) }

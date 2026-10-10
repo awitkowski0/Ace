@@ -19,7 +19,7 @@ function Welcome() {
   const { recent } = useStore(projectStore);
   return (
     <div className="welcome">
-      <h1>Atelier</h1>
+      <h1>Ace</h1>
       <button className="primary" onClick={pickAndOpenFolder}>Open Folder…</button>
       <button onClick={openRemoteProject}>Open Remote Project…</button>
       {recent.length > 0 && <div className="welcome-recent">

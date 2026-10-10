@@ -16,7 +16,7 @@ export function Toolbar() {
       <div className="traffic-spacer" data-tauri-drag-region />
       <button className="widget" title="Projects (Recent Projects)" onClick={() => openPopup("RecentProjects")}>
         <span className="proj-badge">{root ? projectName(root).slice(0, 2).toUpperCase() : "A"}</span>
-        <span>{root ? projectName(root) : "Atelier"}</span>
+        <span>{root ? projectName(root) : "Ace"}</span>
         <ChevronDown />
       </button>
       <button className="widget" title="Git branch" onClick={() => runAction("Git.Branches")}>

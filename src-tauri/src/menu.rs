@@ -9,11 +9,11 @@ const WINDOW_MENU_ID: &str = "window-menu";
 const PROJ_PREFIX: &str = "proj:";
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
-    let about = PredefinedMenuItem::about(app, Some("About Atelier"), None)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Atelier", true, Some("CmdOrCtrl+Q"))?;
+    let about = PredefinedMenuItem::about(app, Some("About Ace"), None)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Ace", true, Some("CmdOrCtrl+Q"))?;
     let app_menu = Submenu::with_items(
         app,
-        "Atelier",
+        "Ace",
         true,
         &[
             &about,

@@ -155,7 +155,7 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
     }
     cb.env("TERM", "xterm-256color");
     cb.env("COLORTERM", "truecolor");
-    cb.env("TERM_PROGRAM", "Atelier");
+    cb.env("TERM_PROGRAM", "Ace");
     cb.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     cb
 }
