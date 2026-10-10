@@ -43,3 +43,17 @@ Several agents work in this tree at the same time. Stay inside the files you own
   — opens/focuses the Terminal tool window and starts a new tab. `command` runs in place of an interactive shell;
   for remote hosts it is run via `login_wrap` so `claude` resolves on mc.
 - Remote fs (owned by remote agent): `fs.*` commands work for any `Location` whose host is an ssh alias.
+
+## Automation harness (for testing — NEVER drive the real keyboard)
+Do not use osascript/System Events keystrokes or mouse automation: they hit whatever window Alex has focused.
+Instead (being built by the harness agent; contract fixed here):
+- Launch: `ATELIER_AUTOMATION=1 src-tauri/target/<profile>/atelier <path-or-host:/path>`. Only with that env var, the app
+  listens on a unix socket (`$ATELIER_AUTOMATION_SOCK`, default `$TMPDIR/atelier-automation.sock`, mode 0600). Without it, no socket.
+- `node scripts/qa/eval.mjs '<async JS body>'` runs JS in the webview and prints the JSON-serialised return value.
+  Helpers on `window.__qa`: `key("meta L")` (IntelliJ keystroke syntax, dispatched as real-shaped keydown/keyup on the
+  focused element), `tap("Shift")`, `type(text)` (Monaco: via `editor.trigger("keyboard","type",{text})`; inputs: value+input
+  event), `waitFor(selectorOrFn, ms)`, `state()` (project, open tabs + dirty flags, active tool windows, focused area,
+  open popup id, cursor position), `actions()` (registered action ids + resolved keys), `sleep(ms)`.
+- `scripts/qa/shot.sh <name>` captures the Atelier window (works while unfocused) into `scripts/qa/out/<name>.png`.
+- QA runs that open Alex's real projects must never save: check `state()` has no dirty tabs before closing, and
+  `git -C <project> status --porcelain` before/after must be identical.
