@@ -23,3 +23,4 @@
 .dm-empty { padding: 16px; color: var(--fg-dim); }
 .dm-group { padding: 6px 8px 2px; color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .dm-prog { height: 2px; background: var(--accent-bg); transition: width .2s; flex: none; }
+.dm-tag.minecraft { color: var(--nord11); }

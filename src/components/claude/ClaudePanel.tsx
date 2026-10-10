@@ -7,7 +7,7 @@ import { showContextMenu } from "../shell/contextMenu";
 import { promptDialog } from "../shell/dialogs";
 import { openFile } from "../../editor/store";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { claudeApi, claudeStore, launch, openSessionProject, refreshHost, relTime, runningIds, type SessionInfo } from "./api";
+import { claudeApi, claudeStore, launch, openSessionProject, refreshHost, relTime, runningIds, unknownRunning, type SessionInfo } from "./api";
 import "./claude.css";
 
 const HOST_KEY = "atelier.claude.host";
@@ -73,6 +73,12 @@ export function ClaudePanel({ root }: ToolWindowProps) {
   const loading = active.some((h) => data[h]?.loading);
   const errors = active.map((h) => (data[h]?.error ? `${h}: ${data[h]!.error}` : null)).filter(Boolean) as string[];
   const running = useMemo(() => new Set(active.flatMap((h) => [...runningIds(data[h])].map((id) => `${h}:${id}`))), [data, activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unknown = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const h of active) for (const [cwd, n] of unknownRunning(data[h])) m.set(`${h}:${cwd}`, n);
+    return m;
+  }, [data, activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -182,6 +188,11 @@ export function ClaudePanel({ root }: ToolWindowProps) {
               {isOpen(g) ? <ChevronDown /> : <ChevronRight />}
               <span>{basename(g.cwd) || g.cwd}</span>
               {host === "all" && g.host !== "local" && <span className="claude-badge host">{g.host}</span>}
+              {(unknown.get(g.key) ?? 0) > 0 && (
+                <span className="claude-badge" title="A claude process is running here but its session cannot be identified (no --resume and no recent writes)">
+                  running (session unknown){(unknown.get(g.key) ?? 0) > 1 ? ` ×${unknown.get(g.key)}` : ""}
+                </span>
+              )}
               <span className="path">{g.cwd}</span>
               <span className="count">{g.items.length}</span>
             </div>

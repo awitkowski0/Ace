@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /** Render `text` with `indices` (code point positions, offset by `offset`) bolded. */
 export function Hl({ text, indices, offset = 0 }: { text: string; indices?: number[]; offset?: number }) {
-  if (!indices || !indices.length) return <>{text}</>;
+  if (!indices || !indices.length) return <span className="se-hlwrap">{text}</span>;
   const set = new Set(indices.map((i) => i - offset));
   const out: ReactNode[] = [];
   let buf = "", on = false, k = 0;
@@ -14,7 +14,7 @@ export function Hl({ text, indices, offset = 0 }: { text: string; indices?: numb
     buf += ch;
   }
   flush();
-  return <>{out}</>;
+  return <span className="se-hlwrap">{out}</span>;
 }
 
 /** Render text with utf16 ranges highlighted. `replacement` (if set) shows old struck + new inserted. */

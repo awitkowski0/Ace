@@ -20,6 +20,8 @@ struct Job {
     upload: bool,
     src: String,
     dest_dir: String,
+    /// Name at the destination (differs from the source name when the user chose "Rename" on a conflict).
+    dest_name: String,
     cancel: Arc<AtomicBool>,
 }
 
@@ -53,6 +55,29 @@ fn name_of(p: &str) -> String {
     p.trim_end_matches('/').rsplit('/').next().unwrap_or(p).to_string()
 }
 
+/// bsdtar `-s` expression renaming the top-level entry `from` to `to` (None when equal).
+fn tar_subst(from: &str, to: &str) -> Option<String> {
+    if from == to {
+        return None;
+    }
+    let delim = [',', '|', '#', '!', '@', '%'].into_iter().find(|d| !from.contains(*d) && !to.contains(*d)).unwrap_or(',');
+    let mut pat = String::new();
+    for c in from.chars() {
+        if "\\.^$*+?()[]{}|/".contains(c) {
+            pat.push('\\');
+        }
+        pat.push(c);
+    }
+    let mut rep = String::new();
+    for c in to.chars() {
+        if c == '\\' || c == '&' {
+            rep.push('\\');
+        }
+        rep.push(c);
+    }
+    Some(format!("{d}^{pat}{d}{rep}{d}", d = delim)) // only one top-level entry is archived, so a prefix rewrite is exact
+}
+
 fn emit(app: &AppHandle, j: &Job, bytes: u64, total: u64, state: &'static str, error: Option<String>) {
     let _ = app.emit(
         "remote://transfer",
@@ -60,14 +85,15 @@ fn emit(app: &AppHandle, j: &Job, bytes: u64, total: u64, state: &'static str, e
     );
 }
 
-fn enqueue(app: &AppHandle, host: &str, upload: bool, srcs: Vec<String>, dest_dir: &str) -> Vec<String> {
+fn enqueue(app: &AppHandle, host: &str, upload: bool, srcs: Vec<String>, dest_dir: &str, dest_names: Option<Vec<String>>) -> Vec<String> {
     let mut ids = vec![];
     {
         let mut qq = q().lock().unwrap();
-        for s in srcs {
+        for (i, s) in srcs.into_iter().enumerate() {
+            let dest_name = dest_names.as_ref().and_then(|n| n.get(i)).filter(|n| !n.is_empty() && !n.contains('/')).cloned().unwrap_or_else(|| name_of(&s));
             let id = format!("t{}", NEXT.fetch_add(1, Ordering::Relaxed));
             let cancel = Arc::new(AtomicBool::new(false));
-            let job = Job { id: id.clone(), host: host.into(), upload, src: s, dest_dir: dest_dir.into(), cancel: cancel.clone() };
+            let job = Job { id: id.clone(), host: host.into(), upload, src: s, dest_dir: dest_dir.into(), dest_name, cancel: cancel.clone() };
             emit(app, &job, 0, 0, "queued", None);
             qq.all.insert(id.clone(), cancel);
             qq.pending.push_back(job);
@@ -198,7 +224,11 @@ fn upload(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
     if meta.is_dir() {
         let parent = src.parent().and_then(|p| p.to_str()).unwrap_or("/");
         let mut tar = Command::new("tar");
-        tar.args(["--no-xattrs", "-cf", "-", "-C", parent, &name]).env("COPYFILE_DISABLE", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        tar.args(["--no-xattrs", "-cf", "-"]);
+        if let Some(expr) = tar_subst(&name, &j.dest_name) {
+            tar.args(["-s", &expr]);
+        }
+        tar.args(["-C", parent, &name]).env("COPYFILE_DISABLE", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let (mut tc, tid) = spawn_tracked(tar, "tar", &format!("tar {name}"))?;
         track(&j.id, tid);
         let script = format!("mkdir -p -- {d} && tar -xf - -C {d}", d = ssh::quote(&j.dest_dir));
@@ -221,7 +251,7 @@ fn upload(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         }
         f?;
     } else {
-        let dest = format!("{}/{}", j.dest_dir.trim_end_matches('/'), name);
+        let dest = format!("{}/{}", j.dest_dir.trim_end_matches('/'), j.dest_name);
         let mode = {
             use std::os::unix::fs::PermissionsExt;
             meta.permissions().mode() & 0o7777
@@ -271,7 +301,11 @@ fn download(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         let (mut sh, sid) = spawn_tracked(sc, "ssh", &format!("download {name}"))?;
         track(&j.id, sid);
         let mut tar = Command::new("tar");
-        tar.args(["-xf", "-", "-C", &j.dest_dir]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+        tar.args(["-xf", "-", "-C", &j.dest_dir]);
+        if let Some(expr) = tar_subst(&name, &j.dest_name) {
+            tar.args(["-s", &expr]);
+        }
+        tar.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
         let (mut tc, tid) = spawn_tracked(tar, "tar", &format!("untar {name}"))?;
         track(&j.id, tid);
         let mut out = sh.stdout.take().unwrap();
@@ -289,8 +323,8 @@ fn download(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         }
         fin?;
     } else {
-        let dest = Path::new(&j.dest_dir).join(&name);
-        let tmp = Path::new(&j.dest_dir).join(format!(".{name}.atelier-part"));
+        let dest = Path::new(&j.dest_dir).join(&j.dest_name);
+        let tmp = Path::new(&j.dest_dir).join(format!(".{}.atelier-part", j.dest_name));
         let mut sc = ssh::command(&j.host, false);
         sc.arg(format!("cat -- {}", ssh::quote(src))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let (mut sh, sid) = spawn_tracked(sc, "ssh", &format!("download {name}"))?;
@@ -321,14 +355,14 @@ fn download(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
 
 /// Upload local files/dirs into `remote_dir` on `host`. Returns transfer ids.
 #[tauri::command]
-pub fn remote_upload(app: AppHandle, host: String, local_paths: Vec<String>, remote_dir: String) -> Vec<String> {
-    enqueue(&app, &host, true, local_paths, &remote_dir)
+pub fn remote_upload(app: AppHandle, host: String, local_paths: Vec<String>, remote_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
+    enqueue(&app, &host, true, local_paths, &remote_dir, dest_names)
 }
 
 /// Download remote files/dirs into `local_dir`. Returns transfer ids.
 #[tauri::command]
-pub fn remote_download(app: AppHandle, host: String, remote_paths: Vec<String>, local_dir: String) -> Vec<String> {
-    enqueue(&app, &host, false, remote_paths, &local_dir)
+pub fn remote_download(app: AppHandle, host: String, remote_paths: Vec<String>, local_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
+    enqueue(&app, &host, false, remote_paths, &local_dir, dest_names)
 }
 
 #[tauri::command]
@@ -351,5 +385,33 @@ pub fn remote_cancel(app: AppHandle, id: String) {
     }
     for i in ids {
         crate::procs::kill(i);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subst_expression() {
+        assert_eq!(tar_subst("a", "a"), None);
+        assert_eq!(tar_subst("my.dir", "my.dir copy").unwrap(), ",^my\\.dir,my.dir copy,");
+        // delimiter avoids chars present in names
+        assert!(tar_subst("a,b", "c").unwrap().starts_with('|'));
+    }
+
+    #[test]
+    fn bsdtar_rename_roundtrip() {
+        let d = std::env::temp_dir().join(format!("atelier-tarsub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("src/my.dir/sub")).unwrap();
+        std::fs::write(d.join("src/my.dir/sub/f.txt"), "hi").unwrap();
+        std::fs::create_dir_all(d.join("out")).unwrap();
+        let expr = tar_subst("my.dir", "my.dir (1)").unwrap();
+        let c = Command::new("tar").args(["-cf", "-", "-s", &expr, "-C"]).arg(d.join("src")).arg("my.dir").stdout(Stdio::piped()).spawn().unwrap();
+        let x = Command::new("tar").args(["-xf", "-", "-C"]).arg(d.join("out")).stdin(c.stdout.unwrap()).status().unwrap();
+        assert!(x.success());
+        assert_eq!(std::fs::read_to_string(d.join("out/my.dir (1)/sub/f.txt")).unwrap(), "hi");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

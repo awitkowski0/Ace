@@ -1,5 +1,5 @@
 import { fs, basename } from "../../lib/ipc";
-import { openPopup } from "../shell/popups";
+import { openDiff as openDiffTab } from "../../editor/store";
 import { absLoc, git, gitStore, type Change, type CommitFile } from "./api";
 import type { Location } from "../../lib/ipc";
 
@@ -13,8 +13,9 @@ export interface DiffSpec {
   openLoc?: Location; // "Open in editor" target
 }
 
+/** Diffs open as editor tabs (IntelliJ parity); the "GitDiff" popup stays registered as a fallback. */
 export function openDiff(spec: DiffSpec) {
-  openPopup("GitDiff", spec);
+  openDiffTab(spec);
 }
 
 /** HEAD vs working tree for a Commit-window change. */

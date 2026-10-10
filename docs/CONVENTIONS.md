@@ -28,12 +28,21 @@ Several agents work in this tree at the same time. Stay inside the files you own
   `registerToolWindow({id, title, icon, side, shortcut?, actionId?, order?, component: ({root}) => ..., headerActions?})`.
   `Activate<Id>ToolWindow` is auto-registered with IntelliJ toggle-focus semantics; mark the focus target `data-autofocus`.
   Status bar: `registerStatusWidget({id, side, order, component})`; branch: `setBranch(name)` from `lib/shell.ts`.
-- Actions: `registerAction({id, title, run, intellijId?, defaultKeys?, isEnabled?})` from `actions/registry`. Keys come from
+- Actions: `registerAction({id, title, run, intellijId?, defaultKeys?, isEnabled?, context?})` from `actions/registry`. Keys come from
   user override → `src/keymap/intellij-macos.json[intellijId]` → `defaultKeys`. `isEnabled() === false` lets the key fall
-  through to Monaco. Chords and `"shift shift"` are supported.
+  through to Monaco. Chords, `"shift shift"` and `"alt alt DOWN"` (double-tap + hold) are supported.
+- Action `context` (IntelliJ precedence **popup > focused tool window > editor > global**, default `"global"`):
+  `"editor"` = only while focus is in an editor group; `{toolWindow: "<id>"}` = only while that tool window has focus (use this
+  for ⌘D/⌘K/⌘W/⌘T style keys that clash with editor/global actions); `"popup"` = only while a popup is open. While a popup is open,
+  editor and tool-window scoped actions are inactive. Keep `isEnabled` for extra conditions.
+- Monaco keybindings: `src/keymap/monacoPolicy.ts` removes every Monaco default that IntelliJ binds differently (audit table in
+  `docs/KEYMAP-AUDIT.md`, enforced by `src/keymap/monacoAudit.test.ts`). To give a key to a new editor action, register it with
+  `context: "editor"`; if it should run a Monaco command add it to `src/editor/editorActionDefs.ts`.
 - Popups: ids SearchEverywhere, GotoFile, GotoAction, FindInPath, RecentFiles, Switcher. `registerPopup(id, Component)`,
   `openPopup(id)`, frame with `<PopupShell>`. Also `promptDialog`, `confirmDialog`, `showContextMenu`.
-- Editor: `openFile(loc)`, `saveAll`, `splitActive("right"|"down")`, `editorStore`; `activeEditor()`, `triggerEditor(cmd)` in
+- Editor: `openFile(loc, {line, col, select?})` (no polling needed: the caret moves when the model mounts; `select` = char count or
+  `{endLine,endCol}`), `openDiff(spec: DiffSpec)` (diff as an editor tab; ⌘S saves the right/working side), `saveAll`,
+  `splitActive("right"|"down")`, `navigateBack/Forward`, `editorStore`; `activeEditor()`, `triggerEditor(cmd)` in
   `editor/editorRegistry.ts`; Monaco instance from `editor/monacoSetup.ts`.
 - Theme: Nord CSS variables in `src/styles/theme.css`. Match IntelliJ New UI spacing (24px rows, 13px UI font).
 

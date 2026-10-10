@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../../lib/ipc";
-import { confirmDialog } from "../shell/dialogs";
+import { confirmDialog, promptDialog } from "../shell/dialogs";
 import { showContextMenu } from "../shell/contextMenu";
 import { openTerminal } from "../terminal/api";
-import { daemonsApi, fmtBytes, fmtUptime, type CleanEvent, type CleanItem, type ProcRow } from "./api";
+import { daemonsApi, fmtBytes, fmtUptime, getExtraRoots, setExtraRoots, type CleanEvent, type CleanItem, type ProcRow } from "./api";
 import "./daemons.css";
 
 type SortKey = "pid" | "kind" | "version" | "rss" | "cpu" | "uptimeSecs" | "busy" | "cwd";
@@ -17,7 +17,7 @@ const COLS: { key: SortKey; title: string; w: string; num?: boolean }[] = [
   { key: "busy", title: "State", w: "60px" },
   { key: "cwd", title: "Project dir", w: "auto" },
 ];
-const KIND_ORDER: Record<string, number> = { gradle: 0, kotlin: 1, java: 2, lsp: 3, claude: 4, atelier: 5 };
+const KIND_ORDER: Record<string, number> = { gradle: 0, kotlin: 1, java: 2, lsp: 3, claude: 4, atelier: 5, minecraft: 6 };
 
 const errMsg = (e: unknown) => (typeof e === "string" ? e : (e as Error)?.message ?? String(e));
 const short = (p: string | null) => (p ? p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~") : "");
@@ -104,26 +104,51 @@ function ProcessesTab({ host }: { host: string }) {
     setWorking(false);
     refresh();
   };
-  const stop = (rs: ProcRow[]) =>
-    run("Stop", async () => {
+  /** Minecraft servers need the PID typed. Resolves to the confirmed PID or null. */
+  const typePid = async (r: ProcRow, verb: string): Promise<number | null> => {
+    const v = await promptDialog({ title: `${verb} "${r.label}" on ${r.host}? Type its PID (${r.pid}) to confirm`, initial: "", okLabel: verb });
+    return v !== null && v.trim() === String(r.pid) ? r.pid : null;
+  };
+  const stop = (rs: ProcRow[]) => {
+    // Minecraft servers are never part of a multi-selection; a single selected server asks for its PID.
+    const guarded = rs.filter((r) => r.guarded);
+    const plain = rs.filter((r) => !r.guarded);
+    return run("Stop", async () => {
       const seen = new Set<string>();
-      for (const r of rs) {
+      for (const r of plain) {
         const k = r.kind === "gradle" && r.version ? `g${r.version}` : `p${r.pid}`;
         if (seen.has(k)) continue;
         seen.add(k);
         await daemonsApi.stop(r);
       }
+      if (guarded.length === 1 && rs.length === 1) {
+        const pid = await typePid(guarded[0], "Stop");
+        if (pid === null) return "cancelled";
+        await daemonsApi.stop(guarded[0], pid);
+      } else if (guarded.length) return `skipped ${guarded.length} Minecraft server(s) (select one alone and type its PID)`;
     });
+  };
   const kill = async (rs: ProcRow[]) => {
     if (!rs.length) return;
+    const guarded = rs.filter((r) => r.guarded);
+    const plain = rs.filter((r) => !r.guarded);
+    if (guarded.length && rs.length > 1) {
+      setStatus(`Minecraft servers are excluded from multi-kill; select ${guarded.length > 1 ? "one" : "it"} alone and type the PID`);
+      if (!plain.length) return;
+    }
+    if (guarded.length === 1 && rs.length === 1) {
+      const pid = await typePid(guarded[0], "Kill");
+      if (pid !== null) run("Kill", () => daemonsApi.kill(guarded[0], pid));
+      return;
+    }
     const ok = await confirmDialog({
-      title: "Kill process" + (rs.length > 1 ? "es" : ""),
-      message: "Send SIGKILL to:\n" + rs.map((r) => `${r.pid}  ${r.label}${r.version ? " " + r.version : ""}  ${short(r.cwd)}`).join("\n"),
+      title: "Kill process" + (plain.length > 1 ? "es" : ""),
+      message: "Send SIGKILL to:\n" + plain.map((r) => `${r.pid}  ${r.label}${r.version ? " " + r.version : ""}  ${short(r.cwd)}`).join("\n"),
       okLabel: "Kill",
     });
-    if (ok) run("Kill", async () => { for (const r of rs) await daemonsApi.kill(r); });
+    if (ok) run("Kill", async () => { for (const r of plain) await daemonsApi.kill(r); });
   };
-  const stopIdle = () => run("Stop idle Gradle", async () => { await daemonsApi.terminate(host, idle.map((r) => r.pid)); return `${idle.length} stopped`; });
+  const stopIdle = () => run("Stop idle Gradle", async () => { await daemonsApi.terminate(host, idle.filter((r) => !r.guarded).map((r) => r.pid)); return `${idle.length} stopped`; });
   const stopAll = async () => {
     const ok = await confirmDialog({
       title: "Stop all Gradle on " + host,
@@ -135,7 +160,7 @@ function ProcessesTab({ host }: { host: string }) {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Delete" && selected.length) { e.preventDefault(); stop(selected); }
-    if (e.key === "a" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setSel(new Set(rows.map((r) => r.pid))); }
+    if (e.key === "a" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); setSel(new Set(rows.filter((r) => !r.guarded).map((r) => r.pid))); }
   };
   const ctx = (e: React.MouseEvent, r: ProcRow) => {
     e.preventDefault();
@@ -186,7 +211,7 @@ function ProcessesTab({ host }: { host: string }) {
             {sorted.map((r) => (
               <tr key={r.pid} className={sel.has(r.pid) ? "sel" : ""} onClick={(e) => click(e, r)} onContextMenu={(e) => ctx(e, r)} title={r.cmd}>
                 <td className="num">{r.pid}</td>
-                <td><span className={"dm-tag " + r.kind}>{r.kind}</span> {r.label}</td>
+                <td><span className={"dm-tag " + r.kind}>{r.kind === "minecraft" ? "mc" : r.kind}</span> {r.label}</td>
                 <td>{r.version ?? ""}</td>
                 <td className="num">{fmtBytes(r.rss)}</td>
                 <td className="num">{r.cpu.toFixed(1)}%</td>
@@ -233,6 +258,13 @@ function CleanupTab({ host }: { host: string }) {
     return () => { dead = true; un?.(); daemonsApi.cleanupCancel(host).catch(() => {}); };
   }, [host, scan]);
 
+  const editRoots = async () => {
+    const cur = getExtraRoots(host).join(", ");
+    const v = await promptDialog({ title: `Extra scan roots on ${host} (comma separated; empty = $HOME + /opt/mc if present)`, initial: cur, okLabel: "Save" });
+    if (v === null) return;
+    setExtraRoots(host, v.split(",").map((x) => x.trim()).filter(Boolean));
+    scan();
+  };
   const group = (g: string) => items.filter((i) => i.group === g).sort((a, b) => (sizes[b.id] ?? -1) - (sizes[a.id] ?? -1));
   const sum = (xs: CleanItem[]) => xs.reduce((n, i) => n + (sizes[i.id] ?? 0), 0);
   const chosen = items.filter((i) => picked.has(i.id) && i.cleanable);
@@ -284,6 +316,7 @@ function CleanupTab({ host }: { host: string }) {
       <div className="dm-bar">
         <button className="dm-btn" disabled={scanning} onClick={scan}>Rescan</button>
         <button className="dm-btn" disabled={!chosen.length} onClick={() => clean(chosen)}>Clean selected ({chosen.length})</button>
+        <button className="dm-btn" title="Extra directories searched for gradle wrappers (protects their distributions). Default: $HOME plus /opt/mc when present." onClick={editRoots}>Scan roots…</button>
         <span className="dm-status">{scanning ? `Scanning${progress ? ` ${progress[0]}/${progress[1]}` : ""}…` : status || `~/.gradle on ${host}: ${fmtBytes(sum(items))}`}</span>
       </div>
       {scanning && <div className="dm-prog" style={{ width: progress ? `${(progress[0] / Math.max(1, progress[1])) * 100}%` : "10%" }} />}

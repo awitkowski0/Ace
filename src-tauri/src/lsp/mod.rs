@@ -28,6 +28,155 @@ struct Session {
 pub struct LspState {
     sessions: Mutex<HashMap<String, Session>>,
     next: Mutex<u64>,
+    /// Pre-warmed headless Godot (one per app; replaced when another project warms up).
+    warm: Mutex<Option<Warm>>,
+}
+
+struct Warm {
+    root: String,
+    port: u16,
+    proc_id: Option<u64>, // None while still starting
+}
+
+const GODOT_BIN: &str = "/Applications/Godot.app/Contents/MacOS/Godot";
+
+/// Spawn a headless Godot editor for `root` at low priority and wait until its LSP port accepts connections.
+/// Returns (port, registry id). The child is tracked from spawn so an app exit during startup cannot orphan it.
+fn spawn_godot(root: &str, low_priority: bool) -> Result<(u16, u64, Option<TcpStream>), String> {
+    let godot = std::path::Path::new(GODOT_BIN);
+    if !godot.is_file() {
+        return Err("Godot.app not found".into());
+    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
+    let gargs = ["--path", root, "--editor", "--headless", "--lsp-port", &port.to_string()];
+    let mut cmd = if low_priority {
+        let mut c = Command::new("/usr/bin/nice");
+        c.args(["-n", "15"]).arg(godot).args(gargs);
+        c
+    } else {
+        let mut c = Command::new(godot);
+        c.args(gargs);
+        c
+    };
+    crate::procs::group(&mut cmd);
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    let early = crate::procs::register_killer("lsp", "godot-headless (starting)", Some(child.id()), Box::new(|| {}));
+    let addr = format!("127.0.0.1:{port}");
+    let t0 = std::time::Instant::now();
+    let sock = loop {
+        if let Ok(Some(st)) = child.try_wait() {
+            crate::procs::unregister(early);
+            return Err(format!("godot exited early: {st}"));
+        }
+        if let Ok(s) = connect_tcp(&addr) {
+            break s;
+        }
+        if t0.elapsed() > Duration::from_secs(90) {
+            let _ = child.kill();
+            let _ = child.wait();
+            crate::procs::unregister(early);
+            return Err("godot headless: LSP port did not open".into());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    crate::procs::unregister(early);
+    let id = crate::procs::register("lsp", "godot-headless", child);
+    Ok((port, id, Some(sock)))
+}
+
+/// Exactly one headless Godot per project root: Idle -> Starting -> Ready, shared by pre-warm and `lsp_start`.
+/// Concurrent callers for the same root wait for the single start in flight. Returns the LSP port.
+fn ensure_godot(st: &LspState, root: &str) -> Result<u16, String> {
+    ensure_godot_with(st, root, &|r| spawn_godot(r, true))
+}
+
+type Spawner<'a> = &'a (dyn Fn(&str) -> Result<(u16, u64, Option<TcpStream>), String> + Sync);
+
+fn ensure_godot_with(st: &LspState, root: &str, spawn: Spawner) -> Result<u16, String> {
+    let t0 = std::time::Instant::now();
+    loop {
+        let mut w = st.warm.lock().unwrap();
+        let mut stale = None;
+        match w.as_ref() {
+            Some(c) if c.root == root => {
+                if c.proc_id.is_some() {
+                    return Ok(c.port);
+                }
+                drop(w); // another caller is starting it: wait
+                if t0.elapsed() > Duration::from_secs(100) {
+                    return Err("godot start timed out".into());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Some(other) => stale = other.proc_id,
+            None => {}
+        }
+        *w = Some(Warm { root: root.to_string(), port: 0, proc_id: None });
+        drop(w);
+        if let Some(p) = stale {
+            crate::procs::kill(p);
+        }
+        let res = spawn(root);
+        let mut w = st.warm.lock().unwrap();
+        let ours = w.as_ref().map(|c| c.root == root && c.proc_id.is_none()).unwrap_or(false);
+        return match res {
+            Ok((port, id, _sock)) => {
+                if ours {
+                    *w = Some(Warm { root: root.to_string(), port, proc_id: Some(id) });
+                    Ok(port)
+                } else {
+                    crate::procs::kill(id); // superseded while starting
+                    Err("superseded".into())
+                }
+            }
+            Err(e) => {
+                if ours {
+                    *w = None;
+                }
+                Err(e)
+            }
+        };
+    }
+}
+
+fn drop_warm(st: &LspState, root: &str) {
+    let mut w = st.warm.lock().unwrap();
+    if w.as_ref().map(|c| c.root == root).unwrap_or(false) {
+        if let Some(p) = w.take().and_then(|c| c.proc_id) {
+            crate::procs::kill(p);
+        }
+    }
+}
+
+fn prewarm_blocking(app: AppHandle, root: String) -> Result<(), String> {
+    let st = app.state::<LspState>();
+    if connect_tcp(GODOT_ADDR).is_ok() {
+        return Ok(()); // an editor already serves 6005: reuse it, nothing to warm
+    }
+    ensure_godot(&st, &root).map(|_| ())
+}
+
+/// Idle headless Godot costs ~10% CPU and ~1.5 GB (--max-fps / --frame-delay / --fixed-fps measured: no change),
+/// so stop it when no Godot session has existed for 5 minutes.
+fn schedule_godot_reap(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(300));
+        let st = app.state::<LspState>();
+        let busy = st.sessions.lock().unwrap().keys().any(|k| k.starts_with("godot-"));
+        if !busy {
+            let root = st.warm.lock().unwrap().as_ref().map(|c| c.root.clone());
+            if let Some(r) = root {
+                drop_warm(&st, &r);
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub async fn lsp_prewarm(app: AppHandle, root: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || prewarm_blocking(app, root)).await.map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize, Clone)]
@@ -159,6 +308,9 @@ fn finish(app: &AppHandle, id: &str) {
             crate::procs::kill(p);
         }
         let _ = app.emit(&format!("lsp://closed/{id}"), ());
+        if id.starts_with("godot-") {
+            schedule_godot_reap(app);
+        }
     }
 }
 use tauri::Manager;
@@ -179,39 +331,26 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
         format!("{}-{}", spec.id, *n)
     };
     if spec.bin.is_empty() {
-        let mut proc_id = None;
+        let proc_id = None;
         let sock = match connect_tcp(GODOT_ADDR) {
             Ok(s) => s,
             Err(e) if !auto_godot => return Err(format!("unreachable: {e}")),
             Err(e) => {
-                // Auto-start a headless Godot editor on a free port.
-                let godot = std::path::Path::new("/Applications/Godot.app/Contents/MacOS/Godot");
-                if !godot.is_file() {
+                if !auto_godot && st.warm.lock().unwrap().as_ref().map(|c| c.root != root).unwrap_or(true) {
                     return Err(format!("unreachable: {e}"));
                 }
-                let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
-                let mut child = Command::new(godot)
-                    .args(["--path", &root, "--editor", "--headless", "--lsp-port", &port.to_string()])
-                    .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-                    .spawn().map_err(|e| e.to_string())?;
-                let addr = format!("127.0.0.1:{port}");
-                let t0 = std::time::Instant::now();
-                let sock = loop {
-                    if let Ok(Some(st)) = child.try_wait() {
-                        return Err(format!("godot exited early: {st}"));
+                let mut tries = 0;
+                loop {
+                    let port = ensure_godot(&st, &root).map_err(|m| if m.contains("not found") { format!("unreachable: {e}") } else { m })?;
+                    match connect_tcp(&format!("127.0.0.1:{port}")) {
+                        Ok(s) => break s,
+                        Err(_) if tries == 0 => {
+                            tries += 1;
+                            drop_warm(&st, &root); // dead instance: start a fresh one once
+                        }
+                        Err(x) => return Err(x),
                     }
-                    if let Ok(s) = connect_tcp(&addr) {
-                        break s;
-                    }
-                    if t0.elapsed() > Duration::from_secs(90) {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err("godot headless: LSP port did not open".into());
-                    }
-                    std::thread::sleep(Duration::from_millis(200));
-                };
-                proc_id = Some(crate::procs::register("lsp", "godot-headless", child));
-                sock
+                }
             }
         };
         let rd = sock.try_clone().map_err(|e| e.to_string())?;
@@ -296,5 +435,27 @@ mod tests {
         read_loop(c.try_clone().unwrap(), |m| { echoed.push(m); if echoed.len() == 2 { c.shutdown(std::net::Shutdown::Both).unwrap(); } });
         assert_eq!(echoed, vec!["{\"x\":1}".to_string(), big]);
         let _ = srv.join();
+    }
+
+    #[test]
+    fn concurrent_start_spawns_one_godot_per_root() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let st = LspState::default();
+        let spawned = AtomicUsize::new(0);
+        let spawn = |_r: &str| -> Result<(u16, u64, Option<TcpStream>), String> {
+            spawned.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(300));
+            Ok((4242, 0, None))
+        };
+        let ports: Vec<u16> = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| ensure_godot_with(&st, "/p", &spawn).unwrap())).collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(spawned.load(Ordering::SeqCst), 1);
+        assert!(ports.iter().all(|p| *p == 4242));
+        // failure clears the state so a later call can retry
+        let st2 = LspState::default();
+        assert!(ensure_godot_with(&st2, "/p", &|_| Err("boom".into())).is_err());
+        assert_eq!(ensure_godot_with(&st2, "/p", &|_| Ok((7, 0, None))).unwrap(), 7);
     }
 }

@@ -75,7 +75,20 @@ fn focused(app: &AppHandle) -> bool {
 }
 
 pub fn watch(app: AppHandle, loc: Location) -> Result<(), String> {
-    let key = (loc.host.clone(), loc.path.clone());
+    watch_impl(app, loc, true)
+}
+
+/// Watch ONE directory (non-recursive): used by the Remote Files pane for the visible folder.
+pub fn watch_dir(app: AppHandle, loc: Location) -> Result<(), String> {
+    watch_impl(app, loc, false)
+}
+
+pub fn unwatch_dir(loc: &Location) {
+    unwatch_key(&(format!("{}\u{0}dir", loc.host), loc.path.clone()));
+}
+
+fn watch_impl(app: AppHandle, loc: Location, recursive: bool) -> Result<(), String> {
+    let key = if recursive { (loc.host.clone(), loc.path.clone()) } else { (format!("{}\u{0}dir", loc.host), loc.path.clone()) };
     if watches().lock().unwrap().contains_key(&key) {
         return Ok(());
     }
@@ -85,8 +98,9 @@ pub fn watch(app: AppHandle, loc: Location) -> Result<(), String> {
     let mut proc_id = None;
     if has_inotify(&host) {
         let script = format!(
-            "inotifywait -m -r -q -e create,delete,modify,moved_to,moved_from --exclude '/(\\.git|node_modules|target|\\.godot)(/|$)' --format '%e|%w%f' {}",
-            ssh::quote(&root)
+            "inotifywait -m {r}-q -e create,delete,modify,moved_to,moved_from,attrib --exclude '/(\\.git|node_modules|target|\\.godot)(/|$)' --format '%e|%w%f' {p}",
+            r = if recursive { "-r " } else { "" },
+            p = ssh::quote(&root)
         );
         let mut cmd = ssh::command(&host, false);
         cmd.arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
@@ -138,14 +152,18 @@ pub fn watch(app: AppHandle, loc: Location) -> Result<(), String> {
         });
     } else {
         let (stop2, host2, root2) = (stop.clone(), host.clone(), root.clone());
-        std::thread::spawn(move || poll_loop(app, stop2, host2, root2));
+        std::thread::spawn(move || poll_loop(app, stop2, host2, root2, recursive));
     }
     watches().lock().unwrap().insert(key, Handle { stop, proc_id });
     Ok(())
 }
 
 pub fn unwatch(loc: &Location) {
-    if let Some(h) = watches().lock().unwrap().remove(&(loc.host.clone(), loc.path.clone())) {
+    unwatch_key(&(loc.host.clone(), loc.path.clone()));
+}
+
+fn unwatch_key(key: &(String, String)) {
+    if let Some(h) = watches().lock().unwrap().remove(key) {
         h.stop.store(true, Ordering::Relaxed);
         if let Some(id) = h.proc_id {
             crate::procs::kill(id);
@@ -155,7 +173,7 @@ pub fn unwatch(loc: &Location) {
 
 type Snap = HashMap<String, HashMap<String, (u64, String)>>; // dir -> path -> (size, mtime)
 
-fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String) {
+fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String, recursive: bool) {
     let mut prev: Snap = HashMap::new();
     let mut quiet = 0u32;
     loop {
@@ -169,7 +187,7 @@ fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String) 
         if !focused(&app) {
             continue;
         }
-        let dirs = hot_dirs(&host, &root);
+        let dirs = if recursive { hot_dirs(&host, &root) } else { vec![root.clone()] };
         if dirs.is_empty() {
             continue;
         }
@@ -226,4 +244,14 @@ fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String) 
         }
         quiet = if any { 0 } else { quiet + 1 };
     }
+}
+
+#[tauri::command]
+pub async fn remote_watch_dir(app: AppHandle, loc: Location) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || watch_dir(app, loc)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn remote_unwatch_dir(loc: Location) {
+    unwatch_dir(&loc);
 }

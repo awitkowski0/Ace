@@ -1,3 +1,4 @@
+mod automation;
 mod claude;
 mod daemons;
 mod fs;
@@ -13,8 +14,14 @@ pub use location::Location;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    procs::install();
     tauri::Builder::default()
+        .setup(|app| {
+            automation::start(app.handle());
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // ---- managed state (append one `.manage(...)` line per module under its marker) ----
         .manage(fs::watch::WatchState::default())
         // == pty == (state)
@@ -41,10 +48,14 @@ pub fn run() {
             fs::watch::fs_unwatch,
             procs::procs_list,
             procs::procs_kill,
+            // == automation ==
+            automation::qa_enabled,
+            automation::qa_result,
             // == pty ==
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
+            pty::pty_ack,
             pty::pty_kill,
             // == search ==
             search::search_index,
@@ -72,10 +83,12 @@ pub fn run() {
             // == lsp ==
             lsp::lsp_detect,
             lsp::lsp_start,
+            lsp::lsp_prewarm,
             lsp::lsp_send,
             lsp::lsp_stop,
             // == claude ==
             claude::claude_sessions,
+            claude::claude_sessions_cached,
             claude::claude_running,
             claude::claude_watch,
             claude::claude_unwatch,
@@ -91,6 +104,8 @@ pub fn run() {
             remote::transfer::remote_upload,
             remote::transfer::remote_download,
             remote::transfer::remote_cancel,
+            remote::watch::remote_watch_dir,
+            remote::watch::remote_unwatch_dir,
             // == daemons ==
             daemons::daemons_list,
             daemons::daemons_summary,

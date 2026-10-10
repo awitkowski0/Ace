@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 import { PopupShell, type PopupProps } from "../shell/popups";
 import { languageFor } from "../../editor/languages";
-import { openFile } from "../../editor/store";
+import { openFile, registerDiffController, setDiffDirty } from "../../editor/store";
+import { getEditor, registerEditor, setActiveEditorGroup, unregisterEditor } from "../../editor/editorRegistry";
 import type { DiffSpec } from "./diff";
 
 /**
@@ -10,7 +11,9 @@ import type { DiffSpec } from "./diff";
  * file-backed tabs; to make it a real tab, EditorArea needs a `doc.diff` branch that mounts this
  * <DiffView/> (it is self-contained).
  */
-export function DiffView({ spec, onClose }: { spec: DiffSpec; onClose?: () => void }) {
+export function DiffView({ spec, onClose, tabKey, groupId }: { spec: DiffSpec; onClose?: () => void; tabKey?: string; groupId?: string }) {
+  // Tab mode (tabKey = editor doc key): the right side is the working file and is editable; ⌘S saves it (editor/store.ts).
+  const editable = !!tabKey && !!spec.openLoc && spec.rightLabel !== "Deleted";
   const host = useRef<HTMLDivElement>(null);
   const ed = useRef<editor.IStandaloneDiffEditor | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -18,33 +21,46 @@ export function DiffView({ spec, onClose }: { spec: DiffSpec; onClose?: () => vo
   useEffect(() => {
     let disposed = false;
     const models: editor.ITextModel[] = [];
+    let unreg: (() => void) | undefined;
     (async () => {
       try {
         const [{ monaco }, l, r] = await Promise.all([import("../../editor/monacoSetup"), spec.left(), spec.right()]);
         if (disposed || !host.current) return;
         const lang = languageFor(spec.name);
         const d = monaco.editor.createDiffEditor(host.current, {
-          renderSideBySide: true, readOnly: true, originalEditable: false, automaticLayout: true, theme: "nord",
+          renderSideBySide: true, readOnly: !editable, originalEditable: false, automaticLayout: true, theme: "nord",
           fontFamily: '"JetBrains Mono", Menlo, monospace', fontSize: 13, lineHeight: 20, minimap: { enabled: false },
           scrollBeyondLastLine: false, ignoreTrimWhitespace: false, renderOverviewRuler: true,
         });
         const o = monaco.editor.createModel(l, lang), m = monaco.editor.createModel(r, lang);
         models.push(o, m);
         d.setModel({ original: o, modified: m });
+        if (tabKey) {
+          unreg = registerDiffController(tabKey, { getRight: () => m.getValue() });
+          if (editable) m.onDidChangeContent(() => setDiffDirty(tabKey, m.getValue() !== r));
+        }
         ed.current = d;
         d.onDidUpdateDiff(() => { if (!disposed && d.getLineChanges()?.length) d.goToDiff("next"); });
-        d.getModifiedEditor().focus();
+        const mod = d.getModifiedEditor();
+        if (groupId) {
+          // editor-scoped actions (⌘D, ⌘/, ...) must act on the diff's working side while it has focus
+          mod.onDidFocusEditorText(() => { registerEditor(groupId, mod); setActiveEditorGroup(groupId); });
+          registerEditor(groupId, mod);
+        }
+        mod.focus();
       } catch (e) {
         setErr(String(e));
       }
     })();
     return () => {
       disposed = true;
+      unreg?.();
+      if (groupId && ed.current && getEditor(groupId) === ed.current.getModifiedEditor()) unregisterEditor(groupId);
       ed.current?.dispose();
       ed.current = null;
       models.forEach((m) => m.dispose());
     };
-  }, [spec]);
+  }, [spec, tabKey, editable, groupId]);
 
   const go = (dir: "next" | "previous") => ed.current?.goToDiff(dir);
   return (

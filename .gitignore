@@ -1,5 +1,7 @@
-node_modules
-dist
-target
-src-tauri/gen
 .DS_Store
+dist
+node_modules
+scripts/qa/.bin/
+scripts/qa/out/
+src-tauri/gen
+target

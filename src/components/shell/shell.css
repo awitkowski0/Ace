@@ -1,0 +1,14 @@
+/* Grouped tool window header tabs (Find | Usages) */
+.tw-tabs { display: flex; align-items: center; gap: 2px; height: 100%; }
+.tw-tab { padding: 0 8px; height: 24px; display: flex; align-items: center; border-radius: 5px; color: var(--fg-dim); font-weight: 500; }
+.tw-tab:hover { background: var(--bg-hover); }
+.tw-tab.active { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent-bg); border-radius: 0; }
+
+/* Project tree VCS colouring (IntelliJ Nord-ish): modified blue, new green, ignored dimmed */
+.tree-row.vcs-modified .tree-name { color: var(--nord9); }
+.tree-row.vcs-added .tree-name, .tree-row.vcs-untracked .tree-name { color: var(--nord14); }
+.tree-row.vcs-deleted .tree-name { color: var(--nord11); text-decoration: line-through; }
+.tree-row.vcs-conflict .tree-name { color: var(--nord11); }
+.tree-row.vcs-ignored .tree-name { color: #8c8a63; opacity: .8; } /* dimmed olive, like IntelliJ ignored folders */
+.tree-row.vcs-ignored .tree-icon { opacity: .55; }
+.tree-row.vcs-dir-modified .tree-name { color: var(--nord9); }

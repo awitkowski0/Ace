@@ -22,3 +22,5 @@ export const MinusIcon = () => <I><path d="M3.5 8h9" /></I>;
 export const DotsIcon = () => <I><circle cx="3.5" cy="8" r=".6" fill="currentColor" /><circle cx="8" cy="8" r=".6" fill="currentColor" /><circle cx="12.5" cy="8" r=".6" fill="currentColor" /></I>;
 export const GearIcon = () => <I><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></I>;
 export const PlayIcon = () => <I><path d="M5 3l8 5-8 5z" /></I>;
+export const DiffIcon = () => <I><rect x="1.5" y="2.5" width="5" height="11" rx="1" /><rect x="9.5" y="2.5" width="5" height="11" rx="1" /><path d="M3.3 6h1.4M11.3 9h1.4M12 8.3v1.4" /></I>;
+export const PinIcon = () => <I size={12}><path d="M10 2.500l3.500 3.500-1.500.5-2 2 .5 3-1.500 1.500-2-2-3.500 3.500M5.500 8.500L4 7l1.500-1.500 3-.5" /></I>;

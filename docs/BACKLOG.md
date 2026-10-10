@@ -38,3 +38,13 @@
 - [daemons] mc runs 2 Minecraft server JVMs: label them distinctly ("minecraft server") and require typed confirmation to kill; never included in any bulk action
 - [daemons] status widget local-only — add mc count when a remote project/session is active
 - [daemons] verify Stop on a throwaway daemon (start one in a scratch gradle project, then stop via UI)
+
+## Final perf pass (queued 2026-10-10)
+- [lsp] headless Godot idles at 11–13% CPU and no CLI flag helps: SIGSTOP the Godot process group after ~20s with no LSP traffic and no focused .gd editor; SIGCONT before forwarding the next message (queue it until resumed). Never SIGSTOP a user-launched Godot editor on 6005. Show "GDScript: paused" in the widget.
+- [perf] re-measure RSS/idle CPU with NO other Atelier/WebKit instances running (previous numbers were taken while other agents ran the app).
+- [editor] dispose Monaco models for background tabs beyond N most recent (keep view state + text in a cheap store); lazy language workers.
+- [terminal] don't load xterm webgl/canvas addons until the Terminal tool window is first opened.
+- [perf] `sample` the app + WebContent when idle to find timer/rAF wakeups; pause all polling when the window is unfocused/occluded.
+- [editor] Monaco hover links → tauri-plugin-opener.
+- [daemons] live-test Stop (SIGTERM path) on a throwaway Gradle daemon — still not done.
+- [git] log graph (deferred).

@@ -1,7 +1,9 @@
 import { registerAction } from "./registry";
 import { closeActiveTab, saveAll, splitActive } from "../editor/store";
-import { activeEditor, focusEditor, triggerEditor } from "../editor/editorRegistry";
-import { focusedToolWindowId, hideToolWindow, layoutStore, toggleToolWindow } from "../lib/layout";
+import "../editor/editorActions";
+import { focusEditor } from "../editor/editorRegistry";
+import { focusedToolWindowId, hideToolWindow, layoutStore } from "../lib/layout";
+import { toggleGroup } from "../components/shell/toolGroups";
 import { listToolWindows, subscribeToolWindows } from "../toolwindows/registry";
 import { isPopupOpen, openPopup } from "../components/shell/popups";
 import { pickAndOpenFolder } from "../lib/project";
@@ -25,9 +27,11 @@ popup("Switcher", "Switcher", ["control TAB"]);
 registerAction({ id: "OpenFolder", title: "Open Folder…", run: pickAndOpenFolder });
 
 // Esc in a tool window returns focus to editor; ⇧Esc hides the active tool window.
+// Not in the terminal: there Esc belongs to the shell / TUI (vim, claude); ⇧Esc still hides the window.
+const inTerminal = () => !!document.activeElement?.closest(".term-host");
 registerAction({
   id: "FocusEditor", intellijId: "FocusEditor", title: "Focus Editor", defaultKeys: ["ESCAPE"],
-  isEnabled: () => !isPopupOpen() && focusedToolWindowId() !== null,
+  isEnabled: () => !isPopupOpen() && focusedToolWindowId() !== null && !inTerminal(),
   run: () => focusEditor(),
 });
 registerAction({
@@ -38,15 +42,7 @@ registerAction({
   },
 });
 
-// IntelliJ editor actions -> Monaco commands.
-const mon = (id: string, intellijId: string, title: string, keys: string[], cmd: string) =>
-  registerAction({ id, intellijId, title, defaultKeys: keys, isEnabled: () => !!activeEditor(), run: () => void triggerEditor(cmd) });
-mon("EditorDuplicate", "EditorDuplicate", "Duplicate Line or Selection", ["meta D"], "editor.action.copyLinesDownAction");
-mon("EditorDeleteLine", "EditorDeleteLine", "Delete Line", ["meta BACK_SPACE"], "editor.action.deleteLines");
-mon("CommentByLineComment", "CommentByLineComment", "Comment with Line Comment", ["meta SLASH"], "editor.action.commentLine");
-mon("EditorSelectWord", "EditorSelectWord", "Extend Selection", ["alt UP"], "editor.action.smartSelect.expand");
-mon("EditorUnSelectWord", "EditorUnSelectWord", "Shrink Selection", ["alt DOWN"], "editor.action.smartSelect.shrink");
-mon("ReformatCode", "ReformatCode", "Reformat Code", ["alt meta L"], "editor.action.formatDocument");
+// IntelliJ editor actions (duplicate line, find, go to line, ...) live in src/editor/editorActions.ts (context "editor").
 
 // One Activate<X>ToolWindow action per registered tool window.
 function syncToolWindowActions() {
@@ -54,7 +50,7 @@ function syncToolWindowActions() {
     const id = tw.actionId ?? `Activate${cap(tw.id)}ToolWindow`;
     registerAction({
       id, intellijId: id, title: `${tw.title} Tool Window`,
-      defaultKeys: tw.shortcut ? [tw.shortcut] : [], run: () => toggleToolWindow(tw.id),
+      defaultKeys: tw.shortcut ? [tw.shortcut] : [], run: () => toggleGroup(tw.id),
     });
   }
 }

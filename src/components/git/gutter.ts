@@ -3,6 +3,18 @@ import type { editor } from "monaco-editor";
 import { activeEditor } from "../../editor/editorRegistry";
 import { editorStore, activeDocKey } from "../../editor/store";
 import { absLoc, git, gitStore, relPath, log, type BlameRange } from "./api";
+import { diffHunks } from "./lineDiff";
+
+// HEAD text cache (per repo file); cleared whenever git status changes.
+const headCache = new Map<string, Promise<string | null>>();
+const headText = (root: Parameters<typeof git.show>[0], path: string) => {
+  const k = `${root.host}:${root.path}|${path}`;
+  let p = headCache.get(k);
+  if (!p) headCache.set(k, (p = git.show(root, "HEAD", path).catch(() => null)));
+  return p;
+};
+let modelSub: { dispose(): void } | null = null;
+let modelTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dec = new WeakMap<editor.ITextModel, string[]>();
 const blameDec = new WeakMap<editor.ITextModel, string[]>();
@@ -29,9 +41,14 @@ async function updateGutter(retries = 3) {
   const rel = relPath(c.doc.loc);
   const ch = rel && status ? status.changes.find((x) => x.path === rel) : undefined;
   let ranges: { kind: string; start: number; end: number }[] = [];
-  if (root && ch) {
-    if (["untracked", "added", "renamed", "copied"].includes(ch.kind)) ranges = [{ kind: "added", start: 1, end: c.model.getLineCount() }];
-    else if (ch.kind !== "deleted") ranges = await git.lineChanges(root, rel!).catch(() => []);
+  // Diff HEAD against the *buffer* (unsaved edits included), in the frontend.
+  if (root && rel && status?.isRepo && (ch || c.doc.dirty)) {
+    if (ch && ["untracked", "added"].includes(ch.kind)) ranges = [{ kind: "added", start: 1, end: c.model.getLineCount() }];
+    else if (!ch || ch.kind !== "deleted") {
+      const head = await headText(root, ch?.orig ?? rel);
+      if (my !== gen) return;
+      ranges = head == null ? [{ kind: "added", start: 1, end: c.model.getLineCount() }] : diffHunks(head, c.model.getValue());
+    }
   }
   if (my !== gen) return;
   const max = c.model.getLineCount();
@@ -47,7 +64,16 @@ async function updateGutter(retries = 3) {
     };
   });
   dec.set(c.model, c.model.deltaDecorations(dec.get(c.model) ?? [], next));
+  if (modelSubModel !== c.model) {
+    modelSub?.dispose();
+    modelSubModel = c.model;
+    modelSub = c.model.onDidChangeContent(() => {
+      clearTimeout(modelTimer);
+      modelTimer = setTimeout(() => updateGutter(0), 250);
+    });
+  }
 }
+let modelSubModel: editor.ITextModel | null = null;
 
 const fmt = (t: number) => new Date(t * 1000).toLocaleDateString(undefined, { year: "2-digit", month: "short", day: "numeric" });
 async function updateBlame() {
@@ -100,6 +126,7 @@ export function installGutter() {
     const s = gitStore.get().status;
     if (s !== lastStatus) {
       lastStatus = s;
+      headCache.clear();
       updateGutter();
       if (blameOn) updateBlame();
     }

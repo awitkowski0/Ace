@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../lib/store";
-import { fs, joinPath } from "../../lib/ipc";
+import { fs, joinPath, local } from "../../lib/ipc";
 import { confirmDialog } from "../shell/dialogs";
-import { clearFinishedTransfers, ensureTransferListener, humanSize, rf, transferStore } from "./api";
+import { clearFinishedTransfers, ensureTransferListener, fmtEta, humanSize, rf, transferStore } from "./api";
+import { ConflictModal, resolveConflicts, type Incoming } from "./conflict";
 import { Pane, type PaneHandle } from "./Pane";
 import type { DragPayload, DropTarget } from "./dnd";
 import "./remote-files.css";
@@ -38,16 +39,26 @@ export function RemoteFiles() {
     prevDone.current = doneCount;
   }, [doneCount]);
 
-  const upload = (entries = left.current?.selected() ?? [], dir?: string) => {
+  const incomingOf = (entries: { name: string; path: string; size: number; modified: number | null; isDir: boolean }[]): Incoming[] =>
+    entries.map((e) => ({ name: e.name, path: e.path, size: e.size, modified: e.modified, isDir: e.isDir }));
+  const upload = async (entries = left.current?.selected() ?? [], dir?: string) => {
     const r = right.current;
     if (!r || !entries.length) return;
     const c = r.cwd();
-    rf.upload(c.host, entries.map((e) => e.path), dir ?? c.path).catch((e) => confirmDialog({ title: "Upload failed", message: String(e) }));
+    const dest = dir ?? c.path;
+    try {
+      const plan = await resolveConflicts(incomingOf(entries), { host: c.host, path: dest });
+      if (plan.paths.length) await rf.upload(c.host, plan.paths, dest, plan.names);
+    } catch (e) { void confirmDialog({ title: "Upload failed", message: String(e) }); }
   };
-  const download = (entries = right.current?.selected() ?? [], dir?: string) => {
+  const download = async (entries = right.current?.selected() ?? [], dir?: string) => {
     const l = left.current, r = right.current;
     if (!l || !r || !entries.length) return;
-    rf.download(r.cwd().host, entries.map((e) => e.path), dir ?? l.cwd().path).catch((e) => confirmDialog({ title: "Download failed", message: String(e) }));
+    const dest = dir ?? l.cwd().path;
+    try {
+      const plan = await resolveConflicts(incomingOf(entries), local(dest));
+      if (plan.paths.length) await rf.download(r.cwd().host, plan.paths, dest, plan.names);
+    } catch (e) { void confirmDialog({ title: "Download failed", message: String(e) }); }
   };
 
   const onDrop = async (src: DragPayload, t: DropTarget) => {
@@ -66,8 +77,8 @@ export function RemoteFiles() {
       pane(src.paneId as "local" | "remote")?.refresh();
       return;
     }
-    if (src.paneId === "local") upload(src.entries, dstDir);
-    else download(src.entries, dstDir);
+    if (src.paneId === "local") void upload(src.entries, dstDir);
+    else void download(src.entries, dstDir);
   };
 
   const btn = (label: string, run: () => void, title = label) => (
@@ -79,8 +90,8 @@ export function RemoteFiles() {
   return (
     <div className="rf-root" ref={root} tabIndex={-1}>
       <div className="rf-toolbar">
-        {btn("↑ Upload", () => upload(), "Upload selection from the local pane to the remote folder")}
-        {btn("↓ Download", () => download(), "Download selection from the remote pane to the local folder")}
+        {btn("↑ Upload", () => void upload(), "Upload selection from the local pane to the remote folder")}
+        {btn("↓ Download", () => void download(), "Download selection from the remote pane to the local folder")}
         <span className="rf-tsep" />
         {btn("New Folder", () => act()?.newFolder())}
         {btn("Rename", () => act()?.rename())}
@@ -108,7 +119,7 @@ export function RemoteFiles() {
                 <span className="rf-tr-name" title={t.error ?? t.name}>{t.name}</span>
                 <span className="rf-tr-bar"><i style={{ width: pct + "%" }} /></span>
                 <span className="rf-tr-info">
-                  {t.state === "error" ? "failed" : t.state === "done" ? humanSize(t.bytes) : t.state === "cancelled" ? "cancelled" : t.state === "queued" ? "queued" : `${humanSize(t.bytes)}${t.total ? ` / ${humanSize(t.total)}` : ""}`}
+                  {t.state === "error" ? "failed" : t.state === "done" ? humanSize(t.bytes) : t.state === "cancelled" ? "cancelled" : t.state === "queued" ? "queued" : `${humanSize(t.bytes)}${t.total ? ` / ${humanSize(t.total)}` : ""}${t.speed ? ` · ${humanSize(t.speed)}/s${t.total > t.bytes ? ` · ${fmtEta((t.total - t.bytes) / t.speed)}` : ""}` : ""}`}
                 </span>
                 {(t.state === "running" || t.state === "queued") && (
                   <button className="icon-btn sm" title="Cancel" onClick={() => rf.cancel(t.id)}>✕</button>
@@ -119,6 +130,7 @@ export function RemoteFiles() {
           })}
         </div>
       </div>
+      <ConflictModal />
     </div>
   );
 }

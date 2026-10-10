@@ -18,6 +18,8 @@ export interface Transfer {
   total: number;
   state: "queued" | "running" | "done" | "error" | "cancelled";
   error?: string | null;
+  /** bytes/s, smoothed (computed in the listener from successive events) */
+  speed?: number;
 }
 export interface DiskUsage {
   total: number;
@@ -31,8 +33,10 @@ export const rf = {
   list: (loc: Location) => invoke<RichEntry[]>("remote_list_dir", { loc }),
   chmod: (loc: Location, mode: string, recursive: boolean) => invoke<void>("remote_chmod", { loc, mode, recursive }),
   du: (loc: Location) => invoke<DiskUsage>("remote_disk_usage", { loc }),
-  upload: (host: string, localPaths: string[], remoteDir: string) => invoke<string[]>("remote_upload", { host, localPaths, remoteDir }),
-  download: (host: string, remotePaths: string[], localDir: string) => invoke<string[]>("remote_download", { host, remotePaths, localDir }),
+  upload: (host: string, localPaths: string[], remoteDir: string, destNames?: string[]) => invoke<string[]>("remote_upload", { host, localPaths, remoteDir, destNames: destNames ?? null }),
+  download: (host: string, remotePaths: string[], localDir: string, destNames?: string[]) => invoke<string[]>("remote_download", { host, remotePaths, localDir, destNames: destNames ?? null }),
+  watchDir: (loc: Location) => invoke<void>("remote_watch_dir", { loc }),
+  unwatchDir: (loc: Location) => invoke<void>("remote_unwatch_dir", { loc }),
   cancel: (id: string) => invoke<void>("remote_cancel", { id }),
   bookmarks: () => invoke<Bookmark[]>("remote_bookmarks_get"),
   setBookmarks: (bookmarks: Bookmark[]) => invoke<void>("remote_bookmarks_set", { bookmarks }),
@@ -43,8 +47,20 @@ let listening = false;
 export function ensureTransferListener() {
   if (listening) return;
   listening = true;
+  const samples = new Map<string, { t: number; b: number; speed: number }>();
   listen<Transfer>("remote://transfer", (e) => {
-    const t = e.payload;
+    const t = { ...e.payload };
+    const now = performance.now();
+    if (t.state === "running") {
+      const p = samples.get(t.id);
+      if (p && now > p.t && t.bytes >= p.b) {
+        const inst = ((t.bytes - p.b) / (now - p.t)) * 1000;
+        const speed = p.speed ? p.speed * 0.7 + inst * 0.3 : inst; // EMA
+        samples.set(t.id, { t: now, b: t.bytes, speed });
+        t.speed = speed;
+      } else if (!p) samples.set(t.id, { t: now, b: t.bytes, speed: 0 });
+      else t.speed = p.speed;
+    } else samples.delete(t.id);
     transferStore.set((s) => {
       const i = s.items.findIndex((x) => x.id === t.id);
       return { items: i < 0 ? [...s.items, t] : s.items.map((x, j) => (j === i ? t : x)) };
@@ -90,4 +106,11 @@ export function fmtMode(mode: number, isDir: boolean, isLink: boolean): string {
   let s = isLink ? "l" : isDir ? "d" : "-";
   for (let i = 0; i < 9; i++) s += mode & (1 << (8 - i)) ? bits[i] : "-";
   return s;
+}
+
+export function fmtEta(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return "";
+  const s = Math.round(sec);
+  if (s >= 3600) return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

@@ -17,3 +17,5 @@ export const triggerEditor = (id: string) => {
   e.trigger("atelier", id, null);
   return true;
 };
+export const getEditor = (groupId: string) => editors.get(groupId);
+export const allEditors = () => [...editors.values()];

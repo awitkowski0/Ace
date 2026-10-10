@@ -26,6 +26,7 @@ pub fn command(host: &str, tty: bool) -> Command {
         "-o", "ControlPersist=120",
         "-o", "ServerAliveInterval=30",
         "-o", "ConnectTimeout=8",
+        "-o", "LogLevel=ERROR",
     ]);
     if tty {
         c.arg("-tt");

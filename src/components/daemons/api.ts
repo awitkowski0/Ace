@@ -1,6 +1,6 @@
 import { invoke, listen } from "../../lib/ipc";
 
-export type Kind = "gradle" | "kotlin" | "java" | "lsp" | "claude" | "atelier";
+export type Kind = "gradle" | "kotlin" | "java" | "lsp" | "claude" | "atelier" | "minecraft";
 export interface ProcRow {
   host: string;
   pid: number;
@@ -14,6 +14,8 @@ export interface ProcRow {
   busy: boolean | null;
   atelier: boolean;
   cmd: string;
+  /** Minecraft servers: excluded from bulk actions; killing requires typing the PID */
+  guarded: boolean;
 }
 export interface ListResult {
   rows: ProcRow[];
@@ -45,15 +47,15 @@ export interface CleanResult {
 
 export const daemonsApi = {
   list: (host: string) => invoke<ListResult>("daemons_list", { host }),
-  summary: () => invoke<{ gradleCount: number; rss: number }>("daemons_summary"),
-  stop: (r: ProcRow) => invoke<string>("daemons_stop", { host: r.host, pid: r.pid, kind: r.kind, version: r.version }),
-  kill: (r: ProcRow) => invoke<void>("daemons_kill", { host: r.host, pid: r.pid }),
+  summary: (host?: string) => invoke<{ gradleCount: number; rss: number }>("daemons_summary", { host: host ?? null }),
+  stop: (r: ProcRow, confirmPid?: number) => invoke<string>("daemons_stop", { host: r.host, pid: r.pid, kind: r.kind, version: r.version, confirmPid: confirmPid ?? null }),
+  kill: (r: ProcRow, confirmPid?: number) => invoke<void>("daemons_kill", { host: r.host, pid: r.pid, confirmPid: confirmPid ?? null }),
   terminate: (host: string, pids: number[]) => invoke<void>("daemons_terminate", { host, pids }),
   stopAllGradle: (host: string, rows: ProcRow[]) =>
     invoke<string>("daemons_stop_all_gradle", { host, daemons: rows.map((r) => [r.pid, r.version]) }),
-  cleanupScan: (host: string, scan: string) => invoke<void>("daemons_cleanup_scan", { host, scan }),
+  cleanupScan: (host: string, scan: string) => invoke<void>("daemons_cleanup_scan", { host, scan, extraRoots: getExtraRoots(host) }),
   cleanupCancel: (host: string) => invoke<void>("daemons_cleanup_cancel", { host }),
-  cleanupRun: (host: string, paths: string[]) => invoke<CleanResult>("daemons_cleanup_run", { host, paths }),
+  cleanupRun: (host: string, paths: string[]) => invoke<CleanResult>("daemons_cleanup_run", { host, paths, extraRoots: getExtraRoots(host) }),
   onCleanup: (cb: (e: CleanEvent) => void) => listen<CleanEvent>("daemons://cleanup", (e) => cb(e.payload)),
 };
 
@@ -68,4 +70,20 @@ export function fmtUptime(s: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
   if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${s}s`;
+}
+
+/** Extra directories scanned for gradle-wrapper references (setting, per host). Empty = default ($HOME + /opt/mc when it exists). */
+const ROOTS_KEY = (host: string) => `atelier.daemons.extraRoots.${host}`;
+export function getExtraRoots(host: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(ROOTS_KEY(host)) ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+export function setExtraRoots(host: string, roots: string[]) {
+  try {
+    localStorage.setItem(ROOTS_KEY(host), JSON.stringify(roots));
+  } catch { /* ignore */ }
 }

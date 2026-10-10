@@ -1,4 +1,5 @@
 //! Search & navigation: file index + fuzzy matching, symbols, Find in Files (streamed), replace.
+mod fuzzy;
 mod index;
 mod symbols;
 mod text;

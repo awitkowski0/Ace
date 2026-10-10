@@ -23,9 +23,9 @@ const activeSession = () => {
   return a ? getSession(a) : undefined;
 };
 
-registerAction({ id: "Terminal.NewTab", title: "New Terminal Tab", defaultKeys: ["meta T"], isEnabled: inTerminal, run: () => { newTerminalTab(); } });
-registerAction({ id: "Terminal.Clear", title: "Clear Terminal", defaultKeys: ["meta K"], isEnabled: inTerminal, run: () => activeSession()?.term.clear() });
-registerAction({ id: "Terminal.CloseTab", title: "Close Terminal Tab", defaultKeys: ["meta W"], isEnabled: inTerminal, run: () => { const a = termStore.get().active; if (a) closeSession(a); } });
+registerAction({ id: "Terminal.NewTab", context: { toolWindow: "terminal" }, title: "New Terminal Tab", defaultKeys: ["meta T"], isEnabled: inTerminal, run: () => { newTerminalTab(); } });
+registerAction({ id: "Terminal.Clear", context: { toolWindow: "terminal" }, title: "Clear Terminal", defaultKeys: ["meta K"], isEnabled: inTerminal, run: () => activeSession()?.term.clear() });
+registerAction({ id: "Terminal.CloseTab", context: { toolWindow: "terminal" }, title: "Close Terminal Tab", defaultKeys: ["meta W"], isEnabled: inTerminal, run: () => { const a = termStore.get().active; if (a) closeSession(a); } });
 
 // Registered at import time, i.e. before the global dispatcher, so these win while the terminal has focus:
 //  - Esc goes to the shell (IntelliJ), not "focus editor"; Shift+Esc still reaches HideActiveWindow.

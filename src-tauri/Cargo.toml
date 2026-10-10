@@ -27,6 +27,9 @@ parking_lot = "0.12.5"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 portable-pty = "0.9.0"
 base64 = "0.23.1"
+signal-hook = "0.4.5"
+libc = "0.2.190"
+tauri-plugin-opener = "2.7.0"
 
 [profile.release]
 lto = true

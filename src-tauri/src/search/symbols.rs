@@ -1,8 +1,6 @@
 //! Lightweight regex-based symbol extraction (cached per file in the index).
 use super::index::{Index, SymState};
 use crate::remote::ssh;
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
 use regex::Regex;
 use serde::Serialize;
 use std::sync::{Arc, OnceLock};
@@ -208,10 +206,8 @@ pub fn query(ix: &Index, q: &str, classes_only: bool, limit: usize) -> Result<(V
     if q.trim().is_empty() {
         return Ok((vec![], 0.0));
     }
-    let pat = Pattern::parse(q.trim(), CaseMatching::Smart, Normalization::Smart);
-    let mut m = Matcher::new(Config::DEFAULT);
-    let mut buf = Vec::new();
-    let mut scored: Vec<(u32, String, Sym)> = Vec::new();
+    let q = q.trim();
+    let mut scored: Vec<(i32, String, Sym)> = Vec::new();
     {
         let s: std::sync::MutexGuard<SymState> = ix.sym.lock().unwrap();
         for (rel, syms) in s.map.iter() {
@@ -219,9 +215,8 @@ pub fn query(ix: &Index, q: &str, classes_only: bool, limit: usize) -> Result<(V
                 if classes_only && !CLASS_KINDS.contains(&sym.kind) {
                     continue;
                 }
-                buf.clear();
-                if let Some(sc) = pat.score(Utf32Str::new(&sym.name, &mut buf), &mut m) {
-                    let sc = sc + if matches!(sym.kind, "class" | "interface" | "enum") { 8 } else { 0 };
+                if let Some(mm) = super::fuzzy::anchored_str(q, &sym.name) {
+                    let sc = mm.score + if matches!(sym.kind, "class" | "interface" | "enum") { 30 } else { 0 };
                     scored.push((sc, rel.clone(), sym.clone()));
                 }
             }
@@ -232,12 +227,10 @@ pub fn query(ix: &Index, q: &str, classes_only: bool, limit: usize) -> Result<(V
     let hits = scored
         .into_iter()
         .map(|(score, rel, sym)| {
-            let mut indices = Vec::new();
-            buf.clear();
-            pat.indices(Utf32Str::new(&sym.name, &mut buf), &mut m, &mut indices);
+            let mut indices = super::fuzzy::anchored_str(q, &sym.name).map(|m| m.indices).unwrap_or_default();
             indices.sort_unstable();
             indices.dedup();
-            SymHit { path: format!("{}/{}", ix.root, rel), rel, name: sym.name, kind: sym.kind, line: sym.line, indices, score }
+            SymHit { path: format!("{}/{}", ix.root, rel), rel, name: sym.name, kind: sym.kind, line: sym.line, indices, score: score.max(0) as u32 }
         })
         .collect();
     Ok((hits, t0.elapsed().as_secs_f64() * 1000.0))

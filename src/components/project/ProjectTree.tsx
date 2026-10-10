@@ -5,6 +5,8 @@ import { promptDialog, confirmDialog } from "../shell/dialogs";
 import { showContextMenu } from "../shell/contextMenu";
 import { ChevronDown, ChevronRight, FileIcon, FolderIcon } from "../shell/icons";
 import { projectName } from "../../lib/project";
+import { useVcsClass } from "../shell/vcsStatus";
+import "../shell/shell.css";
 
 const ROW_H = 24;
 const HIDDEN = new Set([".git", ".DS_Store"]);
@@ -29,6 +31,7 @@ export function ProjectTree({ root }: { root: Location }) {
   const box = useRef<HTMLDivElement>(null);
   const loaded = useRef(new Set<string>());
   const loc = useCallback((path: string): Location => ({ host, path }), [host]);
+  const vcs = useVcsClass(root);
 
   const load = useCallback(
     async (path: string) => {
@@ -217,7 +220,7 @@ export function ProjectTree({ root }: { root: Location }) {
           return (
             <div
               key={locKey({ host, path: r.path })}
-              className={"tree-row" + (selected === r.path ? " selected" : "")}
+              className={"tree-row" + (selected === r.path ? " selected" : "") + " " + vcs(r.path, r.isDir)}
               style={{ top: i * ROW_H, height: ROW_H, paddingLeft: 8 + r.depth * 14 }}
               onClick={() => { setSelected(r.path); if (r.isDir) toggle(r.path); }}
               onDoubleClick={() => !r.isDir && openFile(loc(r.path))}

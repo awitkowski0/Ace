@@ -3,8 +3,6 @@ use crate::remote::ssh;
 use crate::Location;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -271,7 +269,6 @@ pub fn split_line_suffix(q: &str) -> (&str, Option<u32>, Option<u32>) {
     (q, None, None)
 }
 
-const NAME_TIER: u32 = 1_000_000;
 
 pub fn query_files(ix: &Index, raw: &str, limit: usize, recent: &[String]) -> FileResult {
     let t0 = Instant::now();
@@ -286,35 +283,21 @@ pub fn query_files(ix: &Index, raw: &str, limit: usize, recent: &[String]) -> Fi
         .enumerate()
         .map(|(i, r)| (r, 100u32.saturating_sub(i as u32 * 3)))
         .collect();
-    let has_slash = q.contains('/');
-    let pat = Pattern::parse(q, CaseMatching::Smart, Normalization::Smart);
+    let q_nospace: String = q.chars().filter(|c| !c.is_whitespace()).collect();
     let files = ix.files.read().unwrap();
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
     let chunk = (files.len() / threads).max(2000);
-    let mut scored: Vec<(u32, u32, usize)> = Vec::new(); // score, len, idx
+    let mut scored: Vec<(i32, u32, usize)> = Vec::new(); // score, len, idx
     std::thread::scope(|s| {
         let mut hs = Vec::new();
         for (ci, part) in files.chunks(chunk).enumerate() {
-            let pat = &pat;
             let recent_rank = &recent_rank;
+            let q = q_nospace.as_str();
             hs.push(s.spawn(move || {
-                let mut m = Matcher::new(Config::DEFAULT.match_paths());
-                let mut buf = Vec::new();
                 let mut out = Vec::new();
                 for (j, e) in part.iter().enumerate() {
-                    let mut score = None;
-                    if !has_slash {
-                        buf.clear();
-                        if let Some(sc) = pat.score(Utf32Str::new(e.name(), &mut buf), &mut m) {
-                            score = Some(NAME_TIER + sc);
-                        }
-                    }
-                    if score.is_none() {
-                        buf.clear();
-                        score = pat.score(Utf32Str::new(&e.rel, &mut buf), &mut m);
-                    }
-                    if let Some(mut sc) = score {
-                        sc += recent_rank.get(e.rel.as_str()).copied().unwrap_or(0);
+                    if let Some(m) = super::fuzzy::match_path(q, &e.rel, e.name_off as usize) {
+                        let sc = m.score + recent_rank.get(e.rel.as_str()).copied().unwrap_or(0) as i32;
                         out.push((sc, e.rel.len() as u32, ci * chunk + j));
                     }
                 }
@@ -332,22 +315,10 @@ pub fn query_files(ix: &Index, raw: &str, limit: usize, recent: &[String]) -> Fi
         scored.truncate(k);
     }
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    let mut m = Matcher::new(Config::DEFAULT.match_paths());
-    let mut buf = Vec::new();
     for (sc, _, idx) in scored {
         let e = &files[idx];
-        let mut indices = Vec::new();
         let name_char_off = e.rel[..e.name_off as usize].chars().count() as u32;
-        if sc >= NAME_TIER && !has_slash {
-            buf.clear();
-            pat.indices(Utf32Str::new(e.name(), &mut buf), &mut m, &mut indices);
-            for i in indices.iter_mut() {
-                *i += name_char_off;
-            }
-        } else {
-            buf.clear();
-            pat.indices(Utf32Str::new(&e.rel, &mut buf), &mut m, &mut indices);
-        }
+        let mut indices = super::fuzzy::match_path(&q_nospace, &e.rel, e.name_off as usize).map(|m| m.indices).unwrap_or_default();
         indices.sort_unstable();
         indices.dedup();
         res.hits.push(FileHit {
@@ -356,7 +327,7 @@ pub fn query_files(ix: &Index, raw: &str, limit: usize, recent: &[String]) -> Fi
             name: e.name().to_string(),
             name_start: name_char_off,
             indices,
-            score: sc,
+            score: sc.max(0) as u32,
         });
     }
     res.elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;

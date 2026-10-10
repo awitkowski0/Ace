@@ -8,6 +8,7 @@ import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { registerGdscript } from "./gdscript";
 import { nordTheme } from "./nordTheme";
+import { applyMonacoKeymapPolicy } from "./monacoKeymap";
 
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker(_: string, label: string) {
@@ -24,5 +25,9 @@ loader.config({ monaco });
 registerGdscript(monaco);
 monaco.editor.defineTheme("nord", nordTheme);
 monaco.editor.setTheme("nord");
+
+// IntelliJ keymap parity: strip Monaco default keybindings IntelliJ binds differently (see docs/KEYMAP-AUDIT.md).
+// Awaited by EditorArea before the first editor mounts so no keystroke ever reaches an un-audited Monaco.
+export const keymapReady = applyMonacoKeymapPolicy(monaco).catch((e) => console.error("monaco keymap policy failed", e));
 
 export { monaco };

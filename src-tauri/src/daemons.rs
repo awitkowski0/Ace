@@ -36,6 +36,8 @@ pub struct ProcRow {
     pub busy: Option<bool>,
     pub atelier: bool,
     pub cmd: String,
+    /// Never part of a bulk action; killing requires typing the PID (Minecraft servers).
+    pub guarded: bool,
 }
 
 #[derive(Serialize)]
@@ -64,6 +66,27 @@ struct Raw1 {
     cwd: Option<String>,
 }
 
+const MC_MAINS: &[&str] = &[
+    "net.minecraft.server.Main", "net.minecraft.server.MinecraftServer", "net.minecraft.bundler.Main", "net.minecraftforge.bootstrap",
+    "net.neoforged", "net.fabricmc.loader.impl.launch.server", "net.fabricmc.loader.launch.server", "io.papermc", "org.bukkit.craftbukkit",
+    "org.spigotmc", "org.quiltmc.loader",
+];
+const MC_JAR_HINTS: &[&str] = &["minecraft", "fabric-server", "fabric-launcher", "paper", "spigot", "purpur", "forge", "neoforge", "quilt-server", "bukkit", "folia", "pufferfish"];
+
+/// "Minecraft server (jar)" when the command line looks like a Minecraft server JVM (jar name / main class / aikar flags).
+pub fn minecraft_label(cmd: &[String]) -> Option<String> {
+    let joined = cmd.join(" ");
+    let jar = cmd.iter().position(|a| a == "-jar").and_then(|i| cmd.get(i + 1)).map(|j| j.rsplit('/').next().unwrap_or(j).to_string());
+    let by_main = MC_MAINS.iter().any(|m| joined.contains(m));
+    let by_jar = jar.as_deref().map(|j| { let l = j.to_lowercase(); MC_JAR_HINTS.iter().any(|h| l.contains(h)) }).unwrap_or(false);
+    let by_flags = joined.contains("-Dusing.aikars.flags") || joined.contains("-Daikars.new.flags");
+    if by_main || by_jar || by_flags {
+        Some(match jar { Some(j) => format!("Minecraft server ({j})"), None => "Minecraft server".into() })
+    } else {
+        None
+    }
+}
+
 pub fn classify(name: &str, cmd: &[String]) -> Option<(&'static str, Option<String>, String)> {
     let joined = cmd.join(" ");
     let exe = cmd.first().map(|s| s.rsplit('/').next().unwrap_or(s)).unwrap_or(name);
@@ -79,6 +102,9 @@ pub fn classify(name: &str, cmd: &[String]) -> Option<(&'static str, Option<Stri
         }
         if joined.contains("org.eclipse.jdt.ls") || joined.contains("jdtls") {
             return Some(("lsp", None, "jdtls".into()));
+        }
+        if let Some(label) = minecraft_label(cmd) {
+            return Some(("minecraft", None, label));
         }
         let label = if let Some(i) = cmd.iter().position(|a| a == "-jar") {
             cmd.get(i + 1).map(|j| j.rsplit('/').next().unwrap_or(j).to_string())
@@ -161,6 +187,8 @@ struct State {
     hist: HashMap<(String, u32, u64), Hist>,
     cwd: HashMap<(u32, u64), String>,
     primed: HashSet<String>,
+    /// (host, pid) of guarded processes (Minecraft servers) from the latest scan of each host.
+    guarded: HashSet<(String, u32)>,
 }
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
@@ -250,6 +278,11 @@ fn scan_local() -> Vec<ProcRow> {
     let mut rows = vec![];
     for (mut r, kind, ver, label, atelier, start) in found {
         r.cwd = st.cwd.get(&(r.pid, start)).cloned();
+        let (mut kind, mut label) = (kind, label);
+        if kind == "java" && r.cwd.as_deref().map_or(false, |c| Path::new(c).join("server.properties").is_file()) {
+            kind = "minecraft";
+            label = "Minecraft server".into();
+        }
         let h = st.hist.entry(("local".into(), r.pid, start)).or_default();
         h.prev = h.last;
         h.last = r.cpu;
@@ -258,8 +291,11 @@ fn scan_local() -> Vec<ProcRow> {
             host: "local".into(), pid: r.pid, kind: kind.into(), label, version: ver, rss: r.rss, cpu: r.cpu,
             uptime_secs: r.uptime, cwd: r.cwd, busy, atelier,
             cmd: r.cmd.join(" ").chars().take(400).collect(),
+            guarded: kind == "minecraft",
         });
     }
+    st.guarded.retain(|g| g.0 != "local");
+    st.guarded.extend(rows.iter().filter(|r| r.guarded).map(|r| ("local".to_string(), r.pid)));
     rows
 }
 
@@ -320,7 +356,20 @@ for d in os.listdir('/proc'):
             cwd = os.readlink('/proc/%d/cwd' % pid)
         except Exception:
             cwd = None
-        out.append({'pid': pid, 'name': comm, 'cmd': cmd[:60], 'rss': rss, 'cpu': ticks / hz, 'start': start / hz, 'cwd': cwd})
+        props = False
+        try:
+            props = bool(cwd) and os.path.exists(cwd + '/server.properties')
+        except Exception:
+            pass
+        box = None
+        try:
+            for l in open('/proc/%d/cgroup' % pid):
+                if 'docker-' in l or '/docker/' in l:
+                    box = 'docker'
+                    break
+        except Exception:
+            pass
+        out.append({'pid': pid, 'name': comm, 'cmd': cmd[:60], 'rss': rss, 'cpu': ticks / hz, 'start': start / hz, 'cwd': cwd, 'props': props, 'box': box})
     except Exception:
         pass
 print(json.dumps({'up': up, 'procs': out}))
@@ -350,7 +399,16 @@ fn scan_remote(host: &str) -> Result<Vec<ProcRow>, String> {
         let pid = p["pid"].as_u64().unwrap_or(0) as u32;
         let name = p["name"].as_str().unwrap_or("").to_string();
         let cmd: Vec<String> = p["cmd"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-        let Some((kind, ver, label)) = classify(&name, &cmd) else { continue };
+        let Some((mut kind, ver, mut label)) = classify(&name, &cmd) else { continue };
+        if kind == "java" && p["props"].as_bool() == Some(true) {
+            kind = "minecraft";
+            label = "Minecraft server".into();
+        }
+        if kind == "minecraft" {
+            if let Some(b) = p["box"].as_str() {
+                label = format!("{label} [{b}]");
+            }
+        }
         let start = p["start"].as_f64().unwrap_or(0.0);
         let startk = (start * 100.0) as u64;
         live.insert((pid, startk));
@@ -369,8 +427,11 @@ fn scan_remote(host: &str) -> Result<Vec<ProcRow>, String> {
             rss: p["rss"].as_u64().unwrap_or(0), cpu, uptime_secs: (up - start).max(0.0) as u64,
             cwd: p["cwd"].as_str().map(String::from), busy, atelier: false,
             cmd: cmd.join(" ").chars().take(400).collect(),
+            guarded: kind == "minecraft",
         });
     }
+    st.guarded.retain(|g| g.0 != host);
+    st.guarded.extend(rows.iter().filter(|r| r.guarded).map(|r| (host.to_string(), r.pid)));
     st.hist.retain(|k, _| k.0 != host || live.contains(&(k.1, k.2)));
     Ok(rows)
 }
@@ -386,15 +447,23 @@ pub async fn daemons_list(host: String) -> Result<ListResult, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Status bar: gradle daemon count + RSS of all gradle+kotlin daemons (local). Cheap: no cpu, no lsof.
+/// Status bar: gradle daemon count + RSS of all gradle+kotlin daemons. Local is cheap (no cpu, no lsof);
+/// a remote host costs one ssh round trip (only asked for while a remote project/session is active).
 #[tauri::command]
-pub async fn daemons_summary() -> Result<Summary, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let v = summary_local();
-        Summary { gradle_count: v.iter().filter(|x| x.1 == "gradle").count() as u32, rss: v.iter().map(|x| x.3).sum() }
+pub async fn daemons_summary(host: Option<String>) -> Result<Summary, String> {
+    tauri::async_runtime::spawn_blocking(move || match host.filter(|h| !is_local(h)) {
+        None => {
+            let v = summary_local();
+            Ok(Summary { gradle_count: v.iter().filter(|x| x.1 == "gradle").count() as u32, rss: v.iter().map(|x| x.3).sum() })
+        }
+        Some(h) => {
+            let rows = scan_remote(&h)?;
+            let d: Vec<&ProcRow> = rows.iter().filter(|r| r.kind == "gradle" || r.kind == "kotlin").collect();
+            Ok(Summary { gradle_count: d.iter().filter(|r| r.kind == "gradle").count() as u32, rss: d.iter().map(|r| r.rss).sum() })
+        }
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------- actions
@@ -439,6 +508,23 @@ fn terminate(host: &str, pids: &[u32]) -> Result<(), String> {
     }
 }
 
+fn host_key(host: &str) -> String {
+    if is_local(host) { "local".into() } else { host.to_string() }
+}
+fn is_guarded(host: &str, pid: u32) -> bool {
+    state().lock().unwrap().guarded.contains(&(host_key(host), pid))
+}
+fn without_guarded(host: &str, pids: &[u32]) -> Vec<u32> {
+    pids.iter().copied().filter(|p| !is_guarded(host, *p)).collect()
+}
+/// Single-process actions on a guarded process need `confirm_pid == pid` (the user typed it).
+fn check_confirm(host: &str, pid: u32, confirm_pid: Option<u32>) -> Result<(), String> {
+    if is_guarded(host, pid) && confirm_pid != Some(pid) {
+        return Err(format!("PID {pid} is a Minecraft server: type its PID to confirm"));
+    }
+    Ok(())
+}
+
 /// Find `<gradle home>/wrapper/dists/gradle-<ver>-*/*/gradle-<ver>/bin/gradle` locally.
 pub fn find_gradle_bin(home: &Path, ver: &str) -> Option<PathBuf> {
     let dists = home.join(".gradle/wrapper/dists");
@@ -457,6 +543,16 @@ pub fn find_gradle_bin(home: &Path, ver: &str) -> Option<PathBuf> {
     None
 }
 
+fn local_stop_cmd(bin: &Path) -> String {
+    format!("{} --stop", ssh::quote(&bin.to_string_lossy()))
+}
+fn remote_stop_script(ver: &str) -> String {
+    format!(
+        "g=$(ls -d \"$HOME\"/.gradle/wrapper/dists/gradle-{v}-*/*/gradle-{v}/bin/gradle 2>/dev/null | head -1); [ -n \"$g\" ] || exit 42; \"$g\" --stop",
+        v = ver
+    )
+}
+
 /// `gradle --stop` with the matching distribution. Ok(true) = ran, Ok(false) = no matching distribution.
 fn gradle_stop(host: &str, ver: &str) -> Result<bool, String> {
     if !ver.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
@@ -465,14 +561,11 @@ fn gradle_stop(host: &str, ver: &str) -> Result<bool, String> {
     if is_local(host) {
         let Some(home) = dirs::home_dir() else { return Ok(false) };
         let Some(bin) = find_gradle_bin(&home, ver) else { return Ok(false) };
-        let cmd = format!("{} --stop", ssh::quote(&bin.to_string_lossy()));
+        let cmd = local_stop_cmd(&bin);
         let out = Command::new("/bin/zsh").args(["-lc", &cmd]).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
         if out.status.success() { Ok(true) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
     } else {
-        let s = format!(
-            "g=$(ls -d \"$HOME\"/.gradle/wrapper/dists/gradle-{v}-*/*/gradle-{v}/bin/gradle 2>/dev/null | head -1); [ -n \"$g\" ] || exit 42; \"$g\" --stop",
-            v = ver
-        );
+        let s = remote_stop_script(ver);
         let out = ssh::exec(host, &ssh::login_wrap(&s))?;
         match out.status.code() {
             Some(0) => Ok(true),
@@ -484,8 +577,9 @@ fn gradle_stop(host: &str, ver: &str) -> Result<bool, String> {
 
 /// Graceful stop of one process. Gradle: `gradle --stop` (stops every daemon of that version); else SIGTERM -> SIGKILL.
 #[tauri::command]
-pub async fn daemons_stop(host: String, pid: u32, kind: String, version: Option<String>) -> Result<String, String> {
+pub async fn daemons_stop(host: String, pid: u32, kind: String, version: Option<String>, confirm_pid: Option<u32>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        check_confirm(&host, pid, confirm_pid)?;
         if kind == "gradle" {
             if let Some(v) = &version {
                 if gradle_stop(&host, v)? {
@@ -501,14 +595,17 @@ pub async fn daemons_stop(host: String, pid: u32, kind: String, version: Option<
 }
 
 #[tauri::command]
-pub async fn daemons_kill(host: String, pid: u32) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || kill_cmd(&host, "KILL", &[pid])).await.map_err(|e| e.to_string())?
+pub async fn daemons_kill(host: String, pid: u32, confirm_pid: Option<u32>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        check_confirm(&host, pid, confirm_pid)?;
+        kill_cmd(&host, "KILL", &[pid])
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// SIGTERM->SIGKILL for the given pids (used by "Stop all idle Gradle": must not touch busy daemons).
 #[tauri::command]
 pub async fn daemons_terminate(host: String, pids: Vec<u32>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || terminate(&host, &pids)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || terminate(&host, &without_guarded(&host, &pids))).await.map_err(|e| e.to_string())?
 }
 
 /// Stop all Gradle daemons on the host: one `gradle --stop` per version, terminate the rest.
@@ -529,7 +626,7 @@ pub async fn daemons_stop_all_gradle(host: String, daemons: Vec<(u32, Option<Str
                 Err(e) => errs.push(format!("{v}: {e}")),
             }
         }
-        let rest: Vec<u32> = daemons.iter().filter(|d| d.1.as_ref().map_or(true, |v| !stopped.contains(v))).map(|d| d.0).collect();
+        let rest: Vec<u32> = without_guarded(&host, &daemons.iter().filter(|d| d.1.as_ref().map_or(true, |v| !stopped.contains(v))).map(|d| d.0).collect::<Vec<_>>());
         terminate(&host, &rest)?;
         Ok(if errs.is_empty() { format!("{} versions stopped", stopped.len()) } else { errs.join("; ") })
     })
@@ -566,6 +663,11 @@ pub struct Env {
     pub scan_roots: Vec<(PathBuf, usize)>,
 }
 impl Env {
+    pub fn real_with(extra: &[String]) -> Env {
+        let mut e = Env::real();
+        e.scan_roots.extend(extra.iter().filter(|x| !x.trim().is_empty()).map(|x| (PathBuf::from(x.trim()), 6)));
+        e
+    }
     pub fn real() -> Env {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         Env {
@@ -695,11 +797,25 @@ fn scans() -> &'static Mutex<HashMap<String, std::sync::Arc<AtomicBool>>> {
     S.get_or_init(Default::default)
 }
 
-fn remote_raw(host: &str) -> Result<RawLayout, String> {
+/// Shell word list of directories to scan for gradle-wrapper references: `$HOME` plus the configured extra roots
+/// (default `/opt/mc`; every root is skipped by the script when it does not exist).
+fn remote_roots(extra: &[String]) -> String {
+    let mut v = vec!["\"$HOME\"".to_string()];
+    if extra.is_empty() {
+        v.push("/opt/mc".into());
+    } else {
+        v.extend(extra.iter().filter(|e| !e.trim().is_empty()).map(|e| ssh::quote(e.trim())));
+    }
+    v.join(" ")
+}
+
+fn remote_raw(host: &str, extra: &[String]) -> Result<RawLayout, String> {
+    let roots = remote_roots(extra);
     let script = r#"g="$HOME/.gradle"
 for d in daemon caches wrapper/dists; do for p in "$g/$d"/*/; do [ -d "$p" ] && printf '%s\t%s\n' "$d" "${p%/}"; done; done
-for r in "$HOME" /opt/mc; do [ -d "$r" ] && find "$r" -maxdepth 6 \( -name node_modules -o -name .git -o -name .gradle -o -name build -o -name .cache -o -name .npm -o -name target \) -prune -o -path '*/gradle/wrapper/gradle-wrapper.properties' -print0 2>/dev/null | xargs -0 -r grep -h '^distributionUrl' 2>/dev/null | sed 's/^/R\t/'; done; true"#;
-    let out = ssh::exec(host, &ssh::login_wrap(script))?;
+for r in @ROOTS@; do [ -d "$r" ] && find "$r" -maxdepth 6 \( -name node_modules -o -name .git -o -name .gradle -o -name build -o -name .cache -o -name .npm -o -name target \) -prune -o -path '*/gradle/wrapper/gradle-wrapper.properties' -print0 2>/dev/null | xargs -0 -r grep -h '^distributionUrl' 2>/dev/null | sed 's/^/R\t/'; done; true"#
+        .replace("@ROOTS@", &roots);
+    let out = ssh::exec(host, &ssh::login_wrap(&script))?;
     let mut r = RawLayout::default();
     for l in String::from_utf8_lossy(&out.stdout).lines() {
         let Some((k, rest)) = l.split_once('\t') else { continue };
@@ -744,7 +860,8 @@ impl ScanEvent {
 
 /// Starts a background scan; results stream as `daemons://cleanup` events. Returns immediately.
 #[tauri::command]
-pub fn daemons_cleanup_scan(app: tauri::AppHandle, host: String, scan: String) {
+pub fn daemons_cleanup_scan(app: tauri::AppHandle, host: String, scan: String, extra_roots: Option<Vec<String>>) {
+    let extra = extra_roots.unwrap_or_default();
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     if let Some(old) = scans().lock().unwrap().insert(host.clone(), cancel.clone()) {
         old.store(true, Ordering::Relaxed);
@@ -755,7 +872,7 @@ pub fn daemons_cleanup_scan(app: tauri::AppHandle, host: String, scan: String) {
         };
         let res: Result<(), String> = (|| {
             let running = running_versions(&host)?;
-            let raw = if is_local(&host) { raw_local(&Env::real()) } else { remote_raw(&host)? };
+            let raw = if is_local(&host) { raw_local(&Env::real_with(&extra)) } else { remote_raw(&host, &extra)? };
             let items = classify_clean(&raw, &running);
             let mut e = ScanEvent::new(&host, &scan);
             e.items = Some(items.clone());
@@ -851,13 +968,14 @@ pub fn clean_local(env: &Env, running: &HashSet<String>, paths: &[String]) -> Cl
 }
 
 #[tauri::command]
-pub async fn daemons_cleanup_run(host: String, paths: Vec<String>) -> Result<CleanResult, String> {
+pub async fn daemons_cleanup_run(host: String, paths: Vec<String>, extra_roots: Option<Vec<String>>) -> Result<CleanResult, String> {
+    let extra = extra_roots.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         let running = running_versions(&host)?;
         if is_local(&host) {
-            return Ok(clean_local(&Env::real(), &running, &paths));
+            return Ok(clean_local(&Env::real_with(&extra), &running, &paths));
         }
-        let items = classify_clean(&remote_raw(&host)?, &running);
+        let items = classify_clean(&remote_raw(&host, &extra)?, &running);
         let mut res = CleanResult { moved: vec![], skipped: vec![] };
         let mut ok = vec![];
         for p in &paths {
@@ -908,6 +1026,35 @@ mod tests {
         assert_eq!(classify("claude", &s(&["claude"])).unwrap().0, "claude");
         assert_eq!(classify("java", &s(&["java", "-Xmx1g", "-jar", "/x/server.jar"])).unwrap().2, "server.jar");
         assert!(classify("zsh", &s(&["zsh"])).is_none());
+    }
+
+    #[test]
+    fn minecraft_is_labelled_and_guarded() {
+        let mc = s(&["java", "-XX:+UseG1GC", "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Xmx8G", "-jar", "./fabric-server-mc.1.20.1-loader.0.18.4-launcher.1.1.2.jar"]);
+        let c = classify("java", &mc).unwrap();
+        assert_eq!(c.0, "minecraft");
+        assert_eq!(c.2, "Minecraft server (fabric-server-mc.1.20.1-loader.0.18.4-launcher.1.1.2.jar)");
+        assert_eq!(classify("java", &s(&["java", "net.minecraft.server.Main"])).unwrap().0, "minecraft");
+        assert_eq!(classify("java", &s(&["java", "-jar", "paper-1.21.jar"])).unwrap().0, "minecraft");
+        assert_eq!(classify("java", &s(&["java", "-jar", "app.jar"])).unwrap().0, "java");
+        // guard bookkeeping
+        state().lock().unwrap().guarded.insert(("mc".into(), 4242));
+        assert!(is_guarded("mc", 4242) && !is_guarded("mc", 1) && !is_guarded("local", 4242));
+        assert_eq!(without_guarded("mc", &[1, 4242, 7]), vec![1, 7]);
+        assert!(check_confirm("mc", 4242, None).is_err());
+        assert!(check_confirm("mc", 4242, Some(1)).is_err());
+        assert!(check_confirm("mc", 4242, Some(4242)).is_ok());
+        assert!(check_confirm("mc", 1, None).is_ok());
+    }
+
+    #[test]
+    fn gradle_stop_commands() {
+        assert_eq!(local_stop_cmd(Path::new("/h/.gradle/wrapper/dists/gradle-9.8.0-bin/x/gradle-9.8.0/bin/gradle")), "'/h/.gradle/wrapper/dists/gradle-9.8.0-bin/x/gradle-9.8.0/bin/gradle' --stop");
+        let r = remote_stop_script("9.8.0");
+        assert!(r.contains("gradle-9.8.0-*/*/gradle-9.8.0/bin/gradle") && r.ends_with("--stop") && r.contains("exit 42"));
+        assert!(gradle_stop("local", "9.8.0; rm -rf /").is_err());
+        assert_eq!(remote_roots(&[]), "\"$HOME\" /opt/mc");
+        assert_eq!(remote_roots(&["/srv/mc".into(), "/data x".into()]), "\"$HOME\" '/srv/mc' '/data x'");
     }
 
     #[test]
@@ -989,7 +1136,7 @@ mod tests {
             println!("  {:40} {:>8} MB cleanable={} {:?} ({} ms)", it.label, b >> 20, it.cleanable, it.note, t.elapsed().as_millis());
         }
         let t = Instant::now();
-        let raw = remote_raw("mc").unwrap();
+        let raw = remote_raw("mc", &[]).unwrap();
         let run = running_versions("mc").unwrap();
         let items = classify_clean(&raw, &run);
         println!("mc raw {} ms running={:?} refs={}", t.elapsed().as_millis(), run, raw.refs.len());

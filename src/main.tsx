@@ -10,8 +10,10 @@ import "./modules"; // registers tool windows / popups / status widgets from eac
 import "./actions/builtin"; // shell actions (must come after tool windows are importable; it also tracks late registrations)
 import { installDispatcher } from "./actions/dispatcher";
 import App from "./App";
+import { maybeInstallQa } from "./qa";
 
 installDispatcher();
+void maybeInstallQa(); // no-op unless ATELIER_AUTOMATION=1 (see src/qa)
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

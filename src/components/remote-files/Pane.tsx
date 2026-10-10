@@ -99,6 +99,27 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane({ paneId, active
     return () => { live = false; };
   }, [remote, host, path]);
 
+  // watch the visible remote directory (inotify when available, else cheap 3s poll while focused)
+  useEffect(() => {
+    if (!remote || !host || !path) return;
+    const target = { host, path };
+    let timer: number | undefined;
+    rf.watchDir(target).catch(() => {});
+    let un: (() => void) | undefined;
+    let dead = false;
+    fs.onChanged((e) => {
+      if (e.root !== path) return;
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setTick((t) => t + 1), 200);
+    }).then((u) => (dead ? u() : (un = u)));
+    return () => {
+      dead = true;
+      clearTimeout(timer);
+      un?.();
+      rf.unwatchDir(target).catch(() => {});
+    };
+  }, [remote, host, path]);
+
   // refresh when the window regains focus
   useEffect(() => {
     const f = () => setTick((t) => t + 1);

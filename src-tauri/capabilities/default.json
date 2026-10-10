@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capability. Other agents: append permissions here (e.g. plugin permissions).",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:default", "opener:default"]
 }

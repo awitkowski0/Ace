@@ -4,6 +4,7 @@ import { projectStore } from "../../lib/project";
 import { shellStore } from "../../lib/shell";
 import { statusWidgets } from "../../toolwindows/registry";
 import { BranchIcon, ChevronRight } from "./icons";
+import { openPopup } from "./popups";
 
 export function StatusBar() {
   const { groups, activeGroup, docs, cursor } = useStore(editorStore);
@@ -12,7 +13,7 @@ export function StatusBar() {
   const widgets = useRegistry(statusWidgets);
   const doc = docs[groups[activeGroup]?.active ?? ""];
   const rel = doc && root && doc.loc.path.startsWith(root.path) ? doc.loc.path.slice(root.path.length + 1) : doc?.loc.path;
-  const crumbs = rel ? rel.split("/") : [];
+  const crumbs = rel && doc?.kind !== "diff" ? rel.split("/") : [];
   const by = (side: "left" | "right") => widgets.filter((w) => w.side === side).sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   return (
     <div className="statusbar">
@@ -26,7 +27,7 @@ export function StatusBar() {
       {by("right").map((w) => <w.component key={w.id} />)}
       {doc && (
         <>
-          <span className="sb-item">{cursor.line}:{cursor.col}</span>
+          {doc.kind !== "diff" && <span className="sb-item" title="Go to Line/Column (⌘L)" onClick={() => openPopup("GotoLine")}>{cursor.line}:{cursor.col}</span>}
           <span className="sb-item">LF</span>
           <span className="sb-item">UTF-8</span>
           <span className="sb-item">4 spaces</span>

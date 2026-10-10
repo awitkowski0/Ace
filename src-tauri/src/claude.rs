@@ -33,13 +33,71 @@ pub struct SessionInfo {
 pub struct RunningClaude {
     pub pid: u32,
     pub cwd: String,
+    /// Explicit `--resume <id>` argument.
     pub session_id: Option<String>,
+    /// Plain `claude` (no --resume): the session whose jsonl in this cwd was appended in the last ~60s.
+    /// Only set when unambiguous (candidates <= plain processes in that cwd). Never a guess otherwise.
+    #[serde(default)]
+    pub active_session_id: Option<String>,
 }
 
-type Cache = Mutex<HashMap<String, (u64, u64, SessionInfo)>>;
+const CACHE_VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize, Default)]
+struct DiskCache {
+    version: u32,
+    /// jsonl path -> (mtime ms, size, info)
+    entries: HashMap<String, (u64, u64, SessionInfo)>,
+    /// last full listing per host (shown immediately while the real refresh runs)
+    snapshots: HashMap<String, Vec<SessionInfo>>,
+}
+
+struct CacheState {
+    d: DiskCache,
+    dirty: bool,
+}
+type Cache = Mutex<CacheState>;
+
+fn cache_file() -> Option<std::path::PathBuf> {
+    dirs::cache_dir().map(|c| c.join("atelier").join(format!("claude-sessions.v{CACHE_VERSION}.json")))
+}
+
+fn load_disk() -> DiskCache {
+    let fresh = || DiskCache { version: CACHE_VERSION, ..Default::default() };
+    let Some(p) = cache_file() else { return fresh() };
+    let Ok(bytes) = std::fs::read(&p) else { return fresh() };
+    match serde_json::from_slice::<DiskCache>(&bytes) {
+        Ok(d) if d.version == CACHE_VERSION => d,
+        _ => fresh(),
+    }
+}
+
 fn cache() -> &'static Cache {
     static C: OnceLock<Cache> = OnceLock::new();
-    C.get_or_init(Default::default)
+    C.get_or_init(|| Mutex::new(CacheState { d: load_disk(), dirty: false }))
+}
+
+/// Atomically write the cache if it changed.
+fn persist_cache() {
+    let Some(p) = cache_file() else { return };
+    let bytes = {
+        let mut g = cache().lock().unwrap();
+        if !g.dirty {
+            return;
+        }
+        g.dirty = false;
+        match serde_json::to_vec(&g.d) {
+            Ok(b) => b,
+            Err(_) => return,
+        }
+    };
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = p.with_extension("tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
+    }
 }
 
 fn text_of(content: &Value) -> Option<String> {
@@ -138,11 +196,21 @@ fn projects_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))
 }
 
+fn folder_cwd(folder: &str) -> String {
+    folder.replacen('-', "/", 1).replace('-', "/")
+}
+
 fn local_sessions() -> Vec<SessionInfo> {
     let Some(root) = projects_dir() else { return vec![] };
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let Ok(dirs) = std::fs::read_dir(&root) else { return out };
+    // 1. stat everything (cheap), 2. parse only files whose (mtime,size) changed, in parallel.
+    struct Item {
+        path: std::path::PathBuf,
+        folder: String,
+        mtime: u64,
+        size: u64,
+    }
+    let mut items: Vec<Item> = Vec::new();
+    let Ok(dirs) = std::fs::read_dir(&root) else { return vec![] };
     for d in dirs.flatten() {
         let Ok(files) = std::fs::read_dir(d.path()) else { continue };
         let folder = d.file_name().to_string_lossy().into_owned();
@@ -153,26 +221,69 @@ fn local_sessions() -> Vec<SessionInfo> {
             }
             let Ok(md) = f.metadata() else { continue };
             let mtime = md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let key = p.to_string_lossy().into_owned();
-            seen.insert(key.clone());
-            let cached = cache().lock().unwrap().get(&key).filter(|c| c.0 == mtime && c.1 == md.len()).map(|c| c.2.clone());
-            let mut info = match cached {
-                Some(i) => i,
-                None => {
-                    let id = p.file_stem().unwrap().to_string_lossy().into_owned();
-                    let i = parse_file(&p, &id, mtime, md.len());
-                    cache().lock().unwrap().insert(key, (mtime, md.len(), i.clone()));
-                    i
-                }
-            };
-            if info.cwd.is_empty() {
-                info.cwd = folder.replacen('-', "/", 1).replace('-', "/");
-            }
-            out.push(info);
+            items.push(Item { path: p, folder: folder.clone(), mtime, size: md.len() });
         }
     }
-    cache().lock().unwrap().retain(|k, _| seen.contains(k));
-    out
+    let mut out: Vec<Option<SessionInfo>> = vec![None; items.len()];
+    let mut todo: Vec<usize> = Vec::new();
+    {
+        let g = cache().lock().unwrap();
+        for (i, it) in items.iter().enumerate() {
+            let key = it.path.to_string_lossy();
+            match g.d.entries.get(key.as_ref()).filter(|c| c.0 == it.mtime && c.1 == it.size) {
+                Some(c) => out[i] = Some(c.2.clone()),
+                None => todo.push(i),
+            }
+        }
+    }
+    let changed = !todo.is_empty();
+    if !todo.is_empty() {
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+        let chunk = todo.len().div_ceil(threads).max(1);
+        let parsed: Vec<(usize, SessionInfo)> = std::thread::scope(|s| {
+            let hs: Vec<_> = todo
+                .chunks(chunk)
+                .map(|c| {
+                    let items = &items;
+                    s.spawn(move || {
+                        c.iter()
+                            .map(|&i| {
+                                let it = &items[i];
+                                let id = it.path.file_stem().unwrap().to_string_lossy().into_owned();
+                                (i, parse_file(&it.path, &id, it.mtime, it.size))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        });
+        let mut g = cache().lock().unwrap();
+        for (i, info) in parsed {
+            g.d.entries.insert(items[i].path.to_string_lossy().into_owned(), (items[i].mtime, items[i].size, info.clone()));
+            out[i] = Some(info);
+        }
+    }
+    let mut res = Vec::with_capacity(items.len());
+    for (it, info) in items.iter().zip(out) {
+        let mut info = info.unwrap();
+        if info.cwd.is_empty() {
+            info.cwd = folder_cwd(&it.folder);
+        }
+        res.push(info);
+    }
+    {
+        let mut g = cache().lock().unwrap();
+        let live: std::collections::HashSet<String> = items.iter().map(|i| i.path.to_string_lossy().into_owned()).collect();
+        let before = g.d.entries.len();
+        g.d.entries.retain(|k, _| live.contains(k));
+        let mut sorted = res.clone();
+        sorted.sort_by(|a, b| b.modified.cmp(&a.modified));
+        g.d.snapshots.insert("local".into(), sorted);
+        g.dirty = g.dirty || changed || before != g.d.entries.len();
+    }
+    persist_cache();
+    res
 }
 
 const REMOTE_PY: &str = r#"
@@ -237,7 +348,27 @@ fn remote_sessions(host: &str) -> Result<Vec<SessionInfo>, String> {
     let script = format!("HOST={}\n{}", format!("{:?}", host), REMOTE_PY);
     let cmd = format!("python3 -c {}", ssh::quote(&script));
     let out = ssh::exec_login(host, &cmd)?;
-    serde_json::from_str(out.trim()).map_err(|e| format!("bad session list from {host}: {e}"))
+    let v: Vec<SessionInfo> = serde_json::from_str(out.trim()).map_err(|e| format!("bad session list from {host}: {e}"))?;
+    let mut sorted = v.clone();
+    sorted.sort_by(|a, b| b.modified.cmp(&a.modified));
+    {
+        let mut g = cache().lock().unwrap();
+        g.d.snapshots.insert(host.to_string(), sorted);
+        g.dirty = true;
+    }
+    persist_cache();
+    Ok(v)
+}
+
+/// Last persisted listing for `host` (instant, may be stale). The UI shows it and then calls `claude_sessions`.
+#[tauri::command]
+pub async fn claude_sessions_cached(host: String) -> Result<Vec<SessionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = if host.is_empty() { "local".to_string() } else { host };
+        cache().lock().unwrap().d.snapshots.get(&h).cloned().unwrap_or_default()
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -263,7 +394,66 @@ fn parse_ps(ps: &str, cwds: &HashMap<u32, String>) -> Vec<RunningClaude> {
             continue;
         }
         let session_id = args.iter().position(|a| *a == "--resume" || *a == "-r").and_then(|i| args.get(i + 1)).map(|s| s.to_string());
-        out.push(RunningClaude { pid, cwd: cwds.get(&pid).cloned().unwrap_or_default(), session_id });
+        out.push(RunningClaude { pid, cwd: cwds.get(&pid).cloned().unwrap_or_default(), session_id, active_session_id: None });
+    }
+    out
+}
+
+/// Claude's project folder name for a cwd: every non-alphanumeric char becomes '-'.
+fn encode_cwd(cwd: &str) -> String {
+    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+const ACTIVE_WINDOW_SECS: u64 = 60;
+
+/// For plain `claude` processes (no --resume): attach the session whose jsonl in that cwd was appended within
+/// the last minute, but only when that is unambiguous (candidates <= plain procs in that cwd). Otherwise leave
+/// `active_session_id` empty so the UI shows "running (session unknown)".
+fn attach_active(procs: &mut [RunningClaude], recent: &HashMap<String, Vec<String>>) {
+    let explicit: std::collections::HashSet<String> = procs.iter().filter_map(|p| p.session_id.clone()).collect();
+    let mut plain_by_cwd: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, p) in procs.iter().enumerate() {
+        if p.session_id.is_none() && !p.cwd.is_empty() {
+            plain_by_cwd.entry(p.cwd.clone()).or_default().push(i);
+        }
+    }
+    for (cwd, idxs) in plain_by_cwd {
+        let cands: Vec<&String> = recent.get(&cwd).map(|v| v.iter().filter(|id| !explicit.contains(*id)).collect()).unwrap_or_default();
+        if !cands.is_empty() && cands.len() <= idxs.len() {
+            if cands.len() == 1 && idxs.len() == 1 {
+                procs[idxs[0]].active_session_id = Some(cands[0].clone());
+            } else {
+                // several plain procs: we know which sessions are live but not which pid owns which
+                for (k, id) in cands.iter().enumerate() {
+                    procs[idxs[k]].active_session_id = Some((*id).clone());
+                }
+            }
+        }
+    }
+}
+
+fn local_recent(cwds: &[String]) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    let Some(root) = projects_dir() else { return out };
+    for cwd in cwds {
+        let dir = root.join(encode_cwd(cwd));
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let mut v: Vec<(std::time::Duration, String)> = Vec::new();
+        for f in rd.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(md) = f.metadata() else { continue };
+            let Ok(age) = md.modified().and_then(|m| m.elapsed().map_err(std::io::Error::other)) else { continue };
+            if age.as_secs() <= ACTIVE_WINDOW_SECS {
+                v.push((age, p.file_stem().unwrap().to_string_lossy().into_owned()));
+            }
+        }
+        v.sort();
+        if !v.is_empty() {
+            out.insert(cwd.clone(), v.into_iter().map(|x| x.1).collect());
+        }
     }
     out
 }
@@ -293,15 +483,28 @@ pub async fn claude_running(host: String) -> Result<Vec<RunningClaude>, String> 
                     }
                 }
             }
+            let mut cwds: Vec<String> = r.iter().filter(|p| p.session_id.is_none()).map(|p| p.cwd.clone()).filter(|c| !c.is_empty()).collect();
+            cwds.sort();
+            cwds.dedup();
+            let recent = local_recent(&cwds);
+            attach_active(&mut r, &recent);
             Ok(r)
         } else {
-            let script = r#"ps -eo pid=,comm=,args= | awk '$2=="claude"||/claude-code/{print}' | while read -r pid rest; do echo "P $pid $rest"; echo "C $pid $(readlink /proc/$pid/cwd 2>/dev/null)"; done"#;
+            let script = r#"ps -eo pid=,comm=,args= | awk '$2=="claude"||/claude-code/{print}' | while read -r pid rest; do echo "P $pid $rest"; c=$(readlink /proc/$pid/cwd 2>/dev/null); echo "C $pid $c"; d="$HOME/.claude/projects/$(printf %s "$c" | sed 's/[^A-Za-z0-9]/-/g')"; find "$d" -maxdepth 1 -name '*.jsonl' -mmin -1 2>/dev/null | while read -r f; do echo "J $c $(basename "$f" .jsonl)"; done; done"#;
             let out = ssh::exec(&host, script)?;
             let text = String::from_utf8_lossy(&out.stdout).into_owned();
             let mut cwds = HashMap::new();
             let mut ps = String::new();
+            let mut recent: HashMap<String, Vec<String>> = HashMap::new();
             for l in text.lines() {
-                if let Some(r) = l.strip_prefix("P ") {
+                if let Some(r) = l.strip_prefix("J ") {
+                    if let Some((c, id)) = r.rsplit_once(' ') {
+                        let e = recent.entry(c.to_string()).or_default();
+                        if !e.contains(&id.to_string()) {
+                            e.push(id.to_string());
+                        }
+                    }
+                } else if let Some(r) = l.strip_prefix("P ") {
                     ps.push_str(r);
                     ps.push('\n');
                 } else if let Some(r) = l.strip_prefix("C ") {
@@ -312,7 +515,9 @@ pub async fn claude_running(host: String) -> Result<Vec<RunningClaude>, String> 
                     }
                 }
             }
-            Ok(parse_ps(&ps, &cwds))
+            let mut r = parse_ps(&ps, &cwds);
+            attach_active(&mut r, &recent);
+            Ok(r)
         }
     })
     .await
@@ -367,9 +572,42 @@ pub fn claude_reveal(path: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn rc(pid: u32, cwd: &str, sid: Option<&str>) -> RunningClaude {
+        RunningClaude { pid, cwd: cwd.into(), session_id: sid.map(String::from), active_session_id: None }
+    }
+
+    #[test]
+    fn active_detection_never_guesses() {
+        assert_eq!(encode_cwd("/Users/alexw/my_proj.x"), "-Users-alexw-my-proj-x");
+        let mut recent = HashMap::new();
+        recent.insert("/a".to_string(), vec!["s1".to_string()]);
+        recent.insert("/b".to_string(), vec!["s2".to_string(), "s3".to_string()]);
+        // one proc, one recently written jsonl -> attributed
+        let mut p = vec![rc(1, "/a", None)];
+        attach_active(&mut p, &recent);
+        assert_eq!(p[0].active_session_id.as_deref(), Some("s1"));
+        // one proc, two candidates -> ambiguous, nothing claimed
+        let mut p = vec![rc(2, "/b", None)];
+        attach_active(&mut p, &recent);
+        assert_eq!(p[0].active_session_id, None);
+        // explicit --resume of the only candidate -> plain proc stays unknown
+        let mut p = vec![rc(3, "/a", Some("s1")), rc(4, "/a", None)];
+        attach_active(&mut p, &recent);
+        assert_eq!(p[1].active_session_id, None);
+        // no recent writes -> unknown
+        let mut p = vec![rc(5, "/c", None)];
+        attach_active(&mut p, &recent);
+        assert_eq!(p[0].active_session_id, None);
+    }
+
     #[test]
     #[ignore]
     fn live_counts() {
+        let t = std::time::Instant::now();
+        let c = tauri::async_runtime::block_on(super::claude_sessions_cached("local".into())).unwrap();
+        println!("cached list (disk load + deserialize): {} sessions in {:?}", c.len(), t.elapsed());
         for h in ["local", "mc"] {
             for round in 0..2 {
                 let t = std::time::Instant::now();

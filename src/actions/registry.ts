@@ -10,6 +10,15 @@
  */
 import { createRegistry } from "../lib/store";
 
+/**
+ * Where an action is live (IntelliJ-style precedence: popup > focused tool window > editor > global):
+ *  "global"            always (default)
+ *  "editor"            only while focus is inside an editor group (Monaco, tabs, find bar)
+ *  { toolWindow: id }  only while that tool window has focus
+ *  "popup"             only while a popup (Search Everywhere, ...) is open
+ */
+export type ActionContext = "global" | "editor" | "popup" | { toolWindow: string };
+
 export interface Action {
   id: string;
   title: string;
@@ -17,6 +26,8 @@ export interface Action {
   intellijId?: string;
   defaultKeys?: string[]; // IntelliJ syntax; fallback when keymap has no entry
   isEnabled?: () => boolean;
+  /** optional; omitted = "global" (backward compatible) */
+  context?: ActionContext;
 }
 
 const reg = createRegistry<Action>();

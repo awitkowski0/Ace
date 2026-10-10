@@ -52,6 +52,7 @@ registerAction({ id: "Git.Annotate", title: "Annotate with Git Blame", isEnabled
 // ⌘D is "duplicate line" in the editor; only claim it while the Commit window is focused.
 registerAction({
   id: "Diff.ShowDiff",
+  context: { toolWindow: "commit" },
   title: "Show Diff",
   intellijId: "Diff.ShowDiff",
   defaultKeys: ["meta D"],

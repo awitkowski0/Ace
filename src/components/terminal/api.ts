@@ -15,6 +15,7 @@ export interface PtySpawnOpts {
 export const pty = {
   spawn: (opts: PtySpawnOpts) => invoke<string>("pty_spawn", { opts }),
   write: (id: string, data: string) => invoke<void>("pty_write", { id, data }),
+  ack: (id: string, bytes: number) => invoke<void>("pty_ack", { id, bytes }),
   resize: (id: string, cols: number, rows: number) => invoke<void>("pty_resize", { id, cols, rows }),
   kill: (id: string) => invoke<void>("pty_kill", { id }),
   onData: (id: string, cb: (bytes: Uint8Array) => void): Promise<UnlistenFn> =>

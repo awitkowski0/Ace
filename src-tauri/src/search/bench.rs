@@ -24,6 +24,39 @@ fn camel_hump_and_suffix() {
     assert_eq!(r.hits[0].name, "README.md");
 }
 
+fn names(files: &[&str], q: &str) -> Vec<String> {
+    let ix = index::Index {
+        root: "/p".into(), host: "local".into(), local: true,
+        files: std::sync::RwLock::new(files.iter().map(|s| index::Entry::new(s.to_string())).collect()),
+        built: Instant::now(), refreshing: Default::default(), gi: ignore::gitignore::Gitignore::empty(), sym: Default::default(),
+    };
+    index::query_files(&ix, q, 20, &[]).hits.into_iter().map(|h| h.rel).collect()
+}
+
+#[test]
+fn anchored_rejects_scattered() {
+    let files = ["tools/audio_cache/say_f3a9c1.aiff", "tools/audio_cache/say_fox.aiff", "audio/save_file.gd", "scripts/AudioSafe.gd", "scripts/player/PlayerController.gd"];
+    // scattered letters across unrelated words: dropped
+    let r = names(&files, "audsaf");
+    assert!(!r.iter().any(|p| p.starts_with("tools/")), "{r:?}");
+    assert!(r.contains(&"scripts/AudioSafe.gd".to_string()), "camel humps Aud+Saf: {r:?}");
+    assert!(names(&files, "xyz").is_empty());
+    assert!(names(&files, "ayr").is_empty(), "mid-word start");
+    assert!(names(&files, "layer").is_empty());
+    assert!(names(&files, "tlr").is_empty());
+    assert_eq!(names(&files, "scr/pl/ctl"), vec!["scripts/player/PlayerController.gd"]);
+    assert_eq!(names(&files, "PlCo"), vec!["scripts/player/PlayerController.gd"]);
+    assert_eq!(names(&files, "playercontroller:42"), vec!["scripts/player/PlayerController.gd"]);
+    assert_eq!(names(&files, "AudSaf")[0], "scripts/AudioSafe.gd");
+}
+
+#[test]
+fn matcher_indices_are_char_offsets() {
+    let m = fuzzy::match_path("scr/pl/ctl", "scripts/player/PlayerController.gd", 15).unwrap();
+    assert_eq!(&m.indices[..3], &[0, 1, 2]);
+    assert_eq!(m.indices[3], 8);
+}
+
 #[test]
 fn bench_thematic() {
     let Some(root) = root() else { println!("~/thematic-kyf missing; skipped"); return };
@@ -36,7 +69,7 @@ fn bench_thematic() {
     let ix = index::get(&loc).unwrap();
     println!("[bench] index rebuild (warm fs cache): {} files in {:.1} ms", ix.count(), t.elapsed().as_secs_f64() * 1000.0);
 
-    for q in ["pl", "PlCo", "player", "scr/pl/ctl", "main.gd", "x"] {
+    for q in ["pl", "PlCo", "player", "scr/pl/ctl", "main.gd", "x", "audsaf"] {
         let mut best = f64::MAX;
         let mut n = 0;
         for _ in 0..5 {

@@ -55,12 +55,20 @@ const fromRange = (r: monaco.IRange): Rng => ({
 });
 const tdoc = (m: Model) => ({ uri: pathToUri(m.uri.path) });
 
+/** Godot hovers arrive indented (leading \t), which markdown renders as a code block: dedent + trim. */
+export function cleanHover(v: string): string {
+  if (!/^[ \t]/.test(v)) return v;
+  const lines = v.replace(/\r\n/g, "\n").split("\n");
+  const ind = lines.filter((l) => l.trim()).map((l) => /^[ \t]*/.exec(l)![0].length);
+  const cut = ind.length ? Math.min(...ind) : 0;
+  return lines.map((l) => l.slice(Math.min(cut, /^[ \t]*/.exec(l)![0].length))).join("\n").replace(/^\s+/, "");
+}
 function md(c: Json): monaco.IMarkdownString[] {
   if (!c) return [];
   if (Array.isArray(c)) return c.flatMap(md);
-  if (typeof c === "string") return c ? [{ value: c }] : [];
+  if (typeof c === "string") return c ? [{ value: cleanHover(c) }] : [];
   if (c.language) return [{ value: "```" + c.language + "\n" + c.value + "\n```" }];
-  return c.value ? [{ value: c.value }] : [];
+  return c.value ? [{ value: cleanHover(c.value) }] : [];
 }
 const docToMonaco = (d: Json): string | monaco.IMarkdownString | undefined => {
   if (!d) return undefined;

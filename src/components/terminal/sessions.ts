@@ -4,6 +4,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { createStore } from "../../lib/store";
 import { pty } from "./api";
+import { openExternal } from "./external";
 
 export interface Session {
   id: string;
@@ -53,7 +54,7 @@ export function createSession(o: { host: string; cwd: string; command?: string; 
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(new WebLinksAddon((e, uri) => { e.preventDefault(); void openExternal(uri); }));
   const u11 = new Unicode11Addon();
   term.loadAddon(u11);
   term.unicode.activeVersion = "11";
@@ -102,7 +103,18 @@ export async function attach(s: Session) {
   try { s.fit.fit(); } catch {}
   if (s.spawned) return;
   s.spawned = true;
-  const un1 = await pty.onData(s.id, (b) => s.term.write(b));
+  // Flow control: ack bytes once xterm has consumed them (batched), so Rust pauses the child when we lag.
+  let pendingAck = 0;
+  const un1 = await pty.onData(s.id, (b) => {
+    s.term.write(b, () => {
+      pendingAck += b.length;
+      if (pendingAck >= 128 * 1024) {
+        const n = pendingAck;
+        pendingAck = 0;
+        void pty.ack(s.id, n).catch(() => {});
+      }
+    });
+  });
   const un2 = await pty.onExit(s.id, (code) => {
     s.exited = true;
     if (code === 0 || code === null) closeSession(s.id, false);

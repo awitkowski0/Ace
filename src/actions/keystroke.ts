@@ -6,12 +6,31 @@ const MOD_ORDER = ["control", "alt", "shift", "meta"];
 
 const canon = (mods: Set<string>, key: string) => [...MOD_ORDER.filter((m) => mods.has(m)), key].join(" ");
 
-/** Returns canonical sequence ("meta shift O" or "meta K , meta C" or "double shift"), or null if unparseable/ignored. */
+/**
+ * Returns canonical sequence ("meta shift O", "meta K , meta C", "double shift", "doublehold alt DOWN"), or null if
+ * unparseable/ignored. Chord strokes may be separated by "," (keymap JSON) or just follow each other ("meta K meta C").
+ */
 export function parseKeystroke(s: string): string | null {
+  if (!s.trim() || /click|button\d|wheel/i.test(s)) return null;
+  const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  const strokes: string[] = [];
+  for (const part of parts) {
+    const r = parseStrokes(part);
+    if (!r) return null;
+    strokes.push(...r);
+  }
+  return strokes.join(" , ");
+}
+
+function parseStrokes(s: string): string[] | null {
   const toks = s.trim().split(/\s+/).filter(Boolean);
-  if (!toks.length || toks.some((t) => /click|button\d|wheel/i.test(t))) return null;
+  if (!toks.length) return null;
   const low = toks.map((t) => t.toLowerCase());
-  if (low.length === 2 && low[0] === low[1] && MOD_ALIASES[low[0]]) return `double ${MOD_ALIASES[low[0]]}`;
+  if (low.length === 2 && low[0] === low[1] && MOD_ALIASES[low[0]]) return [`double ${MOD_ALIASES[low[0]]}`];
+  // "alt alt DOWN": double-tap + hold gesture (clone caret)
+  if (low.length === 3 && low[0] === low[1] && MOD_ALIASES[low[0]] && !MOD_ALIASES[low[2]])
+    return [`doublehold ${MOD_ALIASES[low[0]]} ${normKeyName(toks[2])}`];
   const strokes: string[] = [];
   let mods = new Set<string>();
   for (let i = 0; i < toks.length; i++) {
@@ -23,7 +42,7 @@ export function parseKeystroke(s: string): string | null {
     }
   }
   if (mods.size || !strokes.length) return null;
-  return strokes.join(" , ");
+  return strokes;
 }
 
 function normKeyName(k: string) {
@@ -36,7 +55,8 @@ const CODE_MAP: Record<string, string> = {
   NumpadEnter: "ENTER", Escape: "ESCAPE", Tab: "TAB", Space: "SPACE", Slash: "SLASH", BracketLeft: "OPEN_BRACKET",
   BracketRight: "CLOSE_BRACKET", Comma: "COMMA", Period: "PERIOD", Minus: "MINUS", Equal: "EQUALS", Semicolon: "SEMICOLON",
   Quote: "QUOTE", Backquote: "BACK_QUOTE", Backslash: "BACK_SLASH", Delete: "DELETE", Home: "HOME", End: "END",
-  PageUp: "PAGE_UP", PageDown: "PAGE_DOWN", Insert: "INSERT",
+  PageUp: "PAGE_UP", PageDown: "PAGE_DOWN", Insert: "INSERT", NumpadAdd: "ADD", NumpadSubtract: "SUBTRACT",
+  NumpadMultiply: "MULTIPLY", NumpadDivide: "DIVIDE",
 };
 
 export function isModifierCode(code: string) {
@@ -79,6 +99,7 @@ export function formatKeystroke(s: string): string {
     .split(" , ")
     .map((st) => {
       if (st.startsWith("double ")) return GLYPH[st.slice(7)] + GLYPH[st.slice(7)];
+      if (st.startsWith("doublehold ")) { const [, m, k] = st.split(" "); return GLYPH[m] + GLYPH[m] + (GLYPH[k] ?? k); }
       return st.split(" ").map((t) => GLYPH[t] ?? t).join("");
     })
     .join(" ");

@@ -7,18 +7,29 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::mpsc::{channel, RecvTimeoutError};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError};
+use std::sync::Condvar;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 const COALESCE: Duration = Duration::from_millis(4);
 const MAX_CHUNK: usize = 64 * 1024;
+/// Flow control: bytes emitted to the frontend but not yet acknowledged (`pty_ack`) before the emitter blocks.
+/// A blocked emitter fills the bounded channel, which blocks the reader, which makes the pty (and the child) wait.
+const HIGH_WATER: usize = 1024 * 1024;
+
+/// Unacknowledged byte counter shared by the emitter thread and `pty_ack`.
+struct Credit {
+    unacked: Mutex<usize>,
+    cv: Condvar,
+}
 
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     proc_id: u64,
+    credit: Arc<Credit>,
 }
 
 fn sessions() -> &'static Mutex<HashMap<String, Session>> {
@@ -117,9 +128,10 @@ pub fn spawn_with(o: SpawnOpts, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> R
     let proc_id = crate::procs::register_killer("pty", &label, pid, Box::new(move || {
         let _ = killer.kill();
     }));
-    sessions().lock().unwrap().insert(id.clone(), Session { writer, master: pair.master, proc_id });
+    let credit = Arc::new(Credit { unacked: Mutex::new(0), cv: Condvar::new() });
+    sessions().lock().unwrap().insert(id.clone(), Session { writer, master: pair.master, proc_id, credit: credit.clone() });
 
-    let (tx, rx) = channel::<Vec<u8>>();
+    let (tx, rx) = sync_channel::<Vec<u8>>(64);
     std::thread::Builder::new().name(format!("pty-read-{id}")).spawn(move || {
         let mut buf = [0u8; 16 * 1024];
         loop {
@@ -136,6 +148,18 @@ pub fn spawn_with(o: SpawnOpts, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> R
 
     let eid = id.clone();
     std::thread::Builder::new().name(format!("pty-emit-{id}")).spawn(move || {
+        // Wait (bounded) until the frontend has caught up; gives up if the session vanished or never acks.
+        let wait_credit = |eid: &str, n: usize| {
+            let mut g = credit.unacked.lock().unwrap();
+            let t0 = Instant::now();
+            while *g > HIGH_WATER && t0.elapsed() < Duration::from_secs(30) {
+                if !sessions().lock().unwrap().contains_key(eid) {
+                    break;
+                }
+                g = credit.cv.wait_timeout(g, Duration::from_millis(200)).unwrap().0;
+            }
+            *g += n;
+        };
         'outer: loop {
             let mut acc = match rx.recv() {
                 Ok(c) => c,
@@ -151,11 +175,13 @@ pub fn spawn_with(o: SpawnOpts, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> R
                     Ok(c) => acc.extend_from_slice(&c),
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => {
+                        wait_credit(&eid, acc.len());
                         sink(&eid, Out::Data(acc));
                         break 'outer;
                     }
                 }
             }
+            wait_credit(&eid, acc.len());
             sink(&eid, Out::Data(acc));
         }
         let code = child.wait().ok().map(|s| s.exit_code());
@@ -195,6 +221,17 @@ pub fn pty_write(id: String, data: String) -> Result<(), String> {
     sess.writer.flush().map_err(|e| e.to_string())
 }
 
+/// Frontend acknowledges `bytes` it has finished writing into xterm (flow control).
+#[tauri::command]
+pub fn pty_ack(id: String, bytes: usize) {
+    let c = sessions().lock().unwrap().get(&id).map(|s| s.credit.clone());
+    if let Some(c) = c {
+        let mut g = c.unacked.lock().unwrap();
+        *g = g.saturating_sub(bytes);
+        c.cv.notify_all();
+    }
+}
+
 #[tauri::command]
 pub fn pty_resize(id: String, cols: u16, rows: u16) -> Result<(), String> {
     let s = sessions().lock().unwrap();
@@ -219,7 +256,7 @@ mod tests {
 
     #[test]
     fn spawn_echo_hi() {
-        let (tx, rx) = channel::<Out>();
+        let (tx, rx) = std::sync::mpsc::channel::<Out>();
         let tx = Mutex::new(tx);
         let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
             let _ = tx.lock().unwrap().send(o);
@@ -244,5 +281,63 @@ mod tests {
         assert!(String::from_utf8_lossy(&text).contains("hi"), "{:?}", String::from_utf8_lossy(&text));
         assert_eq!(code, Some(0));
         assert!(sessions().lock().unwrap().get("t1").is_none());
+    }
+
+    #[test]
+    fn flow_control_pauses_until_ack() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let got = Arc::new(AtomicUsize::new(0));
+        let g2 = got.clone();
+        let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
+            if let Out::Data(d) = o {
+                g2.fetch_add(d.len(), Ordering::SeqCst);
+            }
+        });
+        spawn_with(
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, id: Some("fc1".into()) },
+            sink,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        let paused = got.load(Ordering::SeqCst);
+        assert!(paused > 0 && paused <= HIGH_WATER + 3 * MAX_CHUNK, "unacked output must stop near the high-water mark, got {paused}");
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(got.load(Ordering::SeqCst), paused, "no further output without acks");
+        // ack as we go until the child finishes
+        let t0 = Instant::now();
+        let mut acked = 0;
+        while sessions().lock().unwrap().contains_key("fc1") && t0.elapsed() < Duration::from_secs(20) {
+            let now = got.load(Ordering::SeqCst);
+            if now > acked {
+                pty_ack("fc1".into(), now - acked);
+                acked = now;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(got.load(Ordering::SeqCst) >= 19_000_000);
+    }
+
+    /// Live: `ssh -tt mc` pty path with login_wrap. Run: cargo test pty::tests::live_ssh -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_ssh() {
+        for cmd in ["claude --version", "claude --resume --help | head -3"] {
+            let (tx, rx) = std::sync::mpsc::channel::<Out>();
+            let tx = Mutex::new(tx);
+            let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
+                let _ = tx.lock().unwrap().send(o);
+            });
+            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, id: Some("ssh1".into()) }, sink).unwrap();
+            let mut text = Vec::new();
+            let mut code = None;
+            while let Ok(o) = rx.recv_timeout(Duration::from_secs(30)) {
+                match o {
+                    Out::Data(d) => text.extend(d),
+                    Out::Exit(c) => { code = c; break; }
+                }
+            }
+            println!("[{cmd}] exit={code:?} out={:?}", String::from_utf8_lossy(&text));
+            assert_eq!(code, Some(0));
+        }
     }
 }
