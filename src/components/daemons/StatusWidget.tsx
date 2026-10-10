@@ -4,7 +4,7 @@ import { CpuIcon } from "../shell/icons";
 import { toggleToolWindow } from "../../lib/layout";
 import { projectStore } from "../../lib/project";
 import { useStore } from "../../lib/store";
-import { getSession, termStore } from "../terminal/sessions";
+import { getPane, termStore } from "../terminal/sessions";
 import { daemonsApi, fmtBytes } from "./api";
 
 type Sum = { gradleCount: number; rss: number };
@@ -15,8 +15,8 @@ function useRemoteHosts(): string[] {
   const { tabs } = useStore(termStore);
   const hosts = new Set<string>();
   if (root && root.host !== "local") hosts.add(root.host);
-  for (const id of tabs) {
-    const h = getSession(id)?.host;
+  for (const t of tabs) {
+    const h = getPane(t.focus)?.host;
     if (h && h !== "local") hosts.add(h);
   }
   return [...hosts].sort();

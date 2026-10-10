@@ -11,6 +11,7 @@ import { ToolWindowFrame } from "./components/shell/ToolWindowFrame";
 import { DialogHost } from "./components/shell/dialogs";
 import { ContextMenuHost } from "./components/shell/contextMenu";
 import { PopupHost } from "./components/shell/popups";
+import { QuickTerminal } from "./components/terminal/QuickTerminal";
 
 const EditorArea = lazy(() => import("./editor/EditorArea"));
 
@@ -83,6 +84,7 @@ export default function App() {
         <Stripe which="right" />
       </div>
       <StatusBar />
+      <QuickTerminal />
       <PopupHost />
       <DialogHost />
       <ContextMenuHost />

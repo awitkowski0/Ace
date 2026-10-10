@@ -39,7 +39,8 @@ export function setActive(side: Side, id: string | null) {
 }
 
 const el = (id: string) => document.querySelector<HTMLElement>(`[data-toolwindow="${id}"]`);
-export const isToolWindowFocused = (id: string) => !!el(id)?.contains(document.activeElement);
+// querySelectorAll: a tool window may have an overlay twin (the terminal's quick terminal carries data-toolwindow="terminal" too)
+export const isToolWindowFocused = (id: string) => [...document.querySelectorAll<HTMLElement>(`[data-toolwindow="${id}"]`)].some((e) => e.contains(document.activeElement));
 export const focusedToolWindowId = () =>
   listToolWindows().find((t) => isToolWindowFocused(t.id))?.id ?? null;
 

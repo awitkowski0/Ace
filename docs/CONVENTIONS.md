@@ -51,6 +51,8 @@ Several agents work in this tree at the same time. Stay inside the files you own
   `openTerminal(opts: { host: string; cwd: string; command?: string; title?: string; login?: boolean }): string` (tab id)
   — opens/focuses the Terminal tool window and starts a new tab. `command` runs in place of an interactive shell;
   for remote hosts it is run via `login_wrap` so `claude` resolves on mc.
+- Terminal internals (splits, tabs, shell integration, Ghostty parity, key table): `docs/TERMINAL.md`. Terminal actions use `context: {toolWindow: "terminal"}`; test hooks for the
+  automation harness are `await __qa.term()` (`src/components/terminal/qa.ts`), suite `scripts/qa/terminal.mjs`. The harness uses a private NSPasteboard (`ATELIER_AUTOMATION`).
 - Remote fs (owned by remote agent): `fs.*` commands work for any `Location` whose host is an ssh alias.
 
 ## Automation harness (for testing — NEVER drive the real keyboard)

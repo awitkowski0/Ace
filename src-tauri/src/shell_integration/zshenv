@@ -1,0 +1,9 @@
+# Atelier: private ZDOTDIR. Restore the user's ZDOTDIR first so every other rc file is read from the real place.
+if [[ -n "${ATELIER_ZDOTDIR_ORIG+X}" ]]; then
+  export ZDOTDIR="$ATELIER_ZDOTDIR_ORIG"
+else
+  unset ZDOTDIR
+fi
+unset ATELIER_ZDOTDIR_ORIG
+[[ -f "${ZDOTDIR:-$HOME}/.zshenv" ]] && source "${ZDOTDIR:-$HOME}/.zshenv"
+source "$ATELIER_SHELL_INTEGRATION_DIR/atelier.zsh"

@@ -211,6 +211,8 @@ export function installQaHarness() {
     label: myLabel,
     /** the app's own window-scoped listen (what every module uses) */
     listen,
+    /** terminal test hooks (scripts/qa/terminal.mjs) */
+    term: async () => (await import("../components/terminal/qa")).termQa,
     version: 2,
   };
 }

@@ -10,6 +10,7 @@ mod procs;
 mod pty;
 mod remote;
 mod search;
+mod termext;
 mod windows;
 
 pub use location::Location;
@@ -36,6 +37,7 @@ pub fn run() {
         .on_menu_event(|app, event| menu::on_event(app, &event.id().0))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         // ---- managed state (append one `.manage(...)` line per module under its marker) ----
         .manage(fs::watch::WatchState::default())
         // == pty == (state)
@@ -85,6 +87,14 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_ack,
             pty::pty_kill,
+            pty::pty_busy,
+            pty::pty_cwd,
+            termext::ghostty_themes,
+            termext::ghostty_theme,
+            termext::ghostty_config,
+            termext::clipboard_write,
+            termext::clipboard_read,
+            termext::secure_keyboard_entry,
             // == search ==
             search::search_index,
             search::search_files,

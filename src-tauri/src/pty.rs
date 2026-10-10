@@ -30,6 +30,7 @@ struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     proc_id: u64,
+    pid: Option<u32>,
     credit: Arc<Credit>,
 }
 
@@ -48,6 +49,10 @@ pub struct SpawnOpts {
     pub rows: u16,
     pub login: Option<bool>,
     pub id: Option<String>,
+    /// zsh/bash integration (OSC 7 cwd + OSC 133 prompt marks); default on.
+    pub shell_integration: Option<bool>,
+    /// Override of $SHELL (tests).
+    pub shell: Option<String>,
 }
 
 /// Output sink: (data bytes) / (exit code).
@@ -65,18 +70,59 @@ fn expand_home(p: &str) -> String {
     p.to_string()
 }
 
+const ZSHENV: &str = include_str!("shell_integration/zshenv");
+const ZSH_INTEGRATION: &str = include_str!("shell_integration/atelier.zsh");
+const BASH_RCFILE: &str = include_str!("shell_integration/bash_rcfile");
+
+/// Private directory with the shell-integration files (never the user's dotfiles). Rewritten when the content differs.
+fn integration_dir() -> Option<std::path::PathBuf> {
+    static D: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    D.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("atelier-shell-integration-v1-{}", unsafe { libc::getuid() }));
+        let zsh = dir.join("zsh");
+        std::fs::create_dir_all(&zsh).ok()?;
+        for (path, body) in [(zsh.join(".zshenv"), ZSHENV), (zsh.join("atelier.zsh"), ZSH_INTEGRATION), (dir.join("bash_rcfile"), BASH_RCFILE)] {
+            if std::fs::read_to_string(&path).ok().as_deref() != Some(body) {
+                std::fs::write(&path, body).ok()?;
+            }
+        }
+        Some(dir)
+    })
+    .clone()
+}
+
 fn build_command(o: &SpawnOpts) -> CommandBuilder {
     let mut cb;
+    let integ = o.shell_integration.unwrap_or(true) && o.command.is_none();
     if o.host == "local" {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let shell = o.shell.clone().or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
+        let base = shell.rsplit('/').next().unwrap_or("").to_string();
+        let dir = if integ { integration_dir() } else { None };
         cb = CommandBuilder::new(&shell);
-        match &o.command {
-            Some(c) => {
+        match (&o.command, &dir) {
+            (Some(c), _) => {
                 cb.args(["-lc", c.as_str()]);
             }
-            None => {
+            (None, Some(d)) if base == "bash" => {
+                // bash ignores --rcfile for login shells, so the rcfile emulates the login profile itself.
+                cb.args(["--rcfile", d.join("bash_rcfile").to_string_lossy().as_ref(), "-i"]);
+                cb.env("ATELIER_SHELL_INTEGRATION", "1");
+                if !o.login.unwrap_or(true) {
+                    cb.env("ATELIER_BASH_NOLOGIN", "1");
+                }
+            }
+            (None, d) => {
                 if o.login.unwrap_or(true) {
                     cb.arg("-l");
+                }
+                if let (Some(d), "zsh") = (d, base.as_str()) {
+                    let z = d.join("zsh");
+                    if let Ok(orig) = std::env::var("ZDOTDIR") {
+                        cb.env("ATELIER_ZDOTDIR_ORIG", orig);
+                    }
+                    cb.env("ZDOTDIR", z.to_string_lossy().as_ref());
+                    cb.env("ATELIER_SHELL_INTEGRATION_DIR", z.to_string_lossy().as_ref());
+                    cb.env("ATELIER_SHELL_INTEGRATION", "1");
                 }
             }
         }
@@ -102,6 +148,7 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
         };
         let remote = match &o.command {
             Some(c) => login_wrap(&format!("{cd} && {c}")),
+            None if integ => remote_integration_command(&cd),
             None => format!("{cd} && exec $SHELL -l"),
         };
         cb.arg(remote);
@@ -109,7 +156,16 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
     cb.env("TERM", "xterm-256color");
     cb.env("COLORTERM", "truecolor");
     cb.env("TERM_PROGRAM", "Atelier");
+    cb.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     cb
+}
+
+/// Remote bash with the integration passed through a pipe (`--rcfile <(...)`): nothing is written on the remote host.
+/// Other remote shells just get their normal login shell.
+pub fn remote_integration_command(cd: &str) -> String {
+    let b64 = B64.encode(BASH_RCFILE);
+    let inner = format!("ATELIER_SHELL_INTEGRATION=1 exec bash --rcfile <(printf %s {b64} | base64 -d) -i");
+    format!("{cd} && if [ \"${{SHELL##*/}}\" = bash ]; then exec bash -c {}; else exec $SHELL -l; fi", crate::remote::ssh::quote(&inner))
 }
 
 /// Core spawn path (also used by tests). Returns the session id.
@@ -130,7 +186,7 @@ pub fn spawn_with(o: SpawnOpts, owner: &str, sink: Arc<dyn Fn(&str, Out) + Send 
         let _ = killer.kill();
     }));
     let credit = Arc::new(Credit { unacked: Mutex::new(0), cv: Condvar::new() });
-    sessions().lock().unwrap().insert(id.clone(), Session { owner: owner.to_string(), writer, master: pair.master, proc_id, credit: credit.clone() });
+    sessions().lock().unwrap().insert(id.clone(), Session { owner: owner.to_string(), writer, master: pair.master, proc_id, pid, credit: credit.clone() });
 
     let (tx, rx) = sync_channel::<Vec<u8>>(64);
     std::thread::Builder::new().name(format!("pty-read-{id}")).spawn(move || {
@@ -258,6 +314,46 @@ pub fn pty_kill(id: String) {
     }
 }
 
+/// Is something other than the shell itself in the terminal's foreground (a running command)? Local ptys only; a remote
+/// shell sits behind `ssh`, so the frontend uses OSC 133 there.
+#[tauri::command]
+pub fn pty_busy(id: String) -> bool {
+    let s = sessions().lock().unwrap();
+    let Some(sess) = s.get(&id) else { return false };
+    match (sess.master.process_group_leader(), sess.pid) {
+        (Some(g), Some(p)) => g as u32 != p,
+        _ => false,
+    }
+}
+
+/// Working directory of the terminal's foreground process (macOS: proc_pidinfo). Fallback for shells without OSC 7.
+#[tauri::command]
+pub fn pty_cwd(id: String) -> Option<String> {
+    let (leader, pid) = {
+        let s = sessions().lock().unwrap();
+        let sess = s.get(&id)?;
+        (sess.master.process_group_leader(), sess.pid)
+    };
+    let pid = leader.or(pid.map(|p| p as i32))?;
+    cwd_of(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn cwd_of(pid: i32) -> Option<String> {
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    if n < size {
+        return None;
+    }
+    let bytes: Vec<u8> = info.pvi_cdir.vip_path.iter().flatten().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+    String::from_utf8(bytes).ok().filter(|s| !s.is_empty())
+}
+#[cfg(not(target_os = "macos"))]
+fn cwd_of(pid: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,7 +366,7 @@ mod tests {
             let _ = tx.lock().unwrap().send(o);
         });
         let id = spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, id: Some("t1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, id: Some("t1".into()) },
             "test",
             sink,
         )
@@ -303,7 +399,7 @@ mod tests {
             }
         });
         spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, id: Some("fc1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, id: Some("fc1".into()) },
             "test",
             sink,
         )
@@ -327,6 +423,69 @@ mod tests {
         assert!(got.load(Ordering::SeqCst) >= 19_000_000);
     }
 
+    fn run_interactive(shell: &str, id: &str, script: &[&str]) -> String {
+        let (tx, rx) = std::sync::mpsc::channel::<Out>();
+        let tx = Mutex::new(tx);
+        let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
+            let _ = tx.lock().unwrap().send(o);
+        });
+        spawn_with(
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: None, cols: 80, rows: 24, login: Some(true), shell_integration: Some(true), shell: Some(shell.into()), id: Some(id.into()) },
+            "test",
+            sink,
+        )
+        .unwrap();
+        let mut text = Vec::new();
+        let mut sent = 0;
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(20) {
+            match rx.recv_timeout(Duration::from_millis(700)) {
+                Ok(Out::Data(d)) => text.extend(d),
+                Ok(Out::Exit(_)) => break,
+                Err(_) => {
+                    // quiet: next input line
+                    if sent < script.len() {
+                        pty_write(id.into(), format!("{}\n", script[sent])).unwrap();
+                        sent += 1;
+                    }
+                }
+            }
+        }
+        String::from_utf8_lossy(&text).into_owned()
+    }
+
+    #[test]
+    fn zsh_integration_emits_osc7_and_osc133() {
+        if !std::path::Path::new("/bin/zsh").exists() {
+            return;
+        }
+        let out = run_interactive("/bin/zsh", "zi1", &["cd /usr; echo marker-$((6*7))", "exit"]);
+        assert!(out.contains("\x1b]133;A\x07"), "prompt start mark: {out:?}");
+        assert!(out.contains("\x1b]133;C\x07"), "output start mark: {out:?}");
+        assert!(out.contains("\x1b]133;D;0\x07"), "command finished mark: {out:?}");
+        assert!(out.contains("marker-42"));
+        assert!(out.contains("\x1b]7;file://") && out.contains("/usr\x07"), "osc7 after cd: {out:?}");
+    }
+
+    #[test]
+    fn bash_integration_emits_osc7_and_osc133() {
+        let bash = ["/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"].into_iter().find(|p| std::path::Path::new(p).exists());
+        let Some(bash) = bash else { return };
+        let out = run_interactive(bash, "bi1", &["cd /usr; echo marker-$((6*7))", "exit"]);
+        assert!(out.contains("\x1b]133;A\x07"), "prompt start mark: {out:?}");
+        assert!(out.contains("\x1b]133;D;0\x07"), "command finished mark: {out:?}");
+        assert!(out.contains("marker-42"));
+        assert!(out.contains("\x1b]7;file://") && out.contains("/usr\x07"), "osc7 after cd: {out:?}");
+    }
+
+    #[test]
+    fn remote_integration_command_is_a_pure_pipe() {
+        let c = remote_integration_command("cd ~");
+        assert!(c.starts_with("cd ~ && if [ \"${SHELL##*/}\" = bash ]"));
+        assert!(c.contains("--rcfile <(printf %s ") && c.contains("base64 -d"));
+        assert!(!c.contains("> ") && !c.contains("mktemp") && !c.contains("tee "), "must not write files remotely: {c}");
+    }
+
     /// Live: `ssh -tt mc` pty path with login_wrap. Run: cargo test pty::tests::live_ssh -- --ignored --nocapture
     #[test]
     #[ignore]
@@ -337,7 +496,7 @@ mod tests {
             let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
                 let _ = tx.lock().unwrap().send(o);
             });
-            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
+            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, shell_integration: None, shell: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
             let mut text = Vec::new();
             let mut code = None;
             while let Ok(o) = rx.recv_timeout(Duration::from_secs(30)) {
