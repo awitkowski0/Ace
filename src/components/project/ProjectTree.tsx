@@ -59,7 +59,6 @@ export function ProjectTree({ root }: { root: Location }) {
 
   // refresh on fs events (debounced; only dirs we've loaded)
   useEffect(() => {
-    if (host !== "local") return;
     let timer: number | undefined;
     const dirty = new Set<string>();
     let un: (() => void) | undefined;

@@ -25,6 +25,7 @@ pub fn command(host: &str, tty: bool) -> Command {
         "-o", "ControlPath=~/.ssh/atelier-%C",
         "-o", "ControlPersist=120",
         "-o", "ServerAliveInterval=30",
+        "-o", "ConnectTimeout=8",
     ]);
     if tty {
         c.arg("-tt");
@@ -69,7 +70,7 @@ pub fn close_all() {
     let hosts: Vec<String> = used_hosts().lock().unwrap().iter().cloned().collect();
     for h in hosts {
         let _ = Command::new("ssh")
-            .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-O", "exit", &h])
+            .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ConnectTimeout=2", "-O", "exit", &h])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

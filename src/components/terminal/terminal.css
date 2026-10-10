@@ -1,0 +1,15 @@
+.term-panel { height: 100%; display: flex; flex-direction: column; background: var(--bg-editor); }
+.term-tabs { flex: none; height: 28px; display: flex; align-items: stretch; background: var(--bg-chrome); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.term-tab { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; cursor: default; color: var(--fg-dim); white-space: nowrap; border-bottom: 2px solid transparent; }
+.term-tab:hover { background: var(--bg-hover); }
+.term-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+.term-badge { font-size: 10px; padding: 0 5px; border-radius: 3px; background: var(--accent-bg); color: var(--nord6); line-height: 15px; }
+.term-exited { color: var(--fg-faint); font-size: 11px; }
+.term-x, .term-add { background: none; border: 0; color: var(--fg-dim); cursor: pointer; width: 20px; height: 20px; align-self: center; border-radius: 4px; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 15px; }
+.term-x { opacity: 0; }
+.term-tab:hover .term-x, .term-tab.active .term-x { opacity: 1; }
+.term-x:hover, .term-add:hover { background: var(--bg-selected); color: var(--fg); }
+.term-body { flex: 1; min-height: 0; position: relative; padding: 4px 0 0 8px; }
+.term-host { position: absolute; inset: 4px 0 0 8px; }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background-color: transparent !important; }

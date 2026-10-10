@@ -1,7 +1,6 @@
-// Owned by the daemons agent: replace the placeholder below with the real component (keep this file's registrations).
 import { registerToolWindow } from "../../toolwindows/registry";
 import { CpuIcon } from "../shell/icons";
-import { Placeholder } from "../shell/Placeholder";
+import { DaemonsWindow } from "./DaemonsWindow";
 
 registerToolWindow({
   id: "processes",
@@ -11,7 +10,7 @@ registerToolWindow({
   shortcut: "meta shift D",
   actionId: "ActivateProcessesToolWindow",
   order: 14,
-  component: () => <Placeholder name="Processes" />,
+  component: () => <DaemonsWindow />,
 });
 
 import { registerStatusWidget } from "../../toolwindows/registry";

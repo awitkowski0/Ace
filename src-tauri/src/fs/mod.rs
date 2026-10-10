@@ -54,34 +54,34 @@ pub fn backend_for(host: &str) -> Box<dyn FsBackend> {
 }
 
 #[tauri::command]
-pub fn fs_list_dir(loc: Location) -> FsResult<Vec<DirEntry>> {
+pub async fn fs_list_dir(loc: Location) -> FsResult<Vec<DirEntry>> {
     backend_for(&loc.host).list_dir(&loc.path)
 }
 #[tauri::command]
-pub fn fs_read_file(loc: Location) -> FsResult<String> {
+pub async fn fs_read_file(loc: Location) -> FsResult<String> {
     backend_for(&loc.host).read_file(&loc.path)
 }
 #[tauri::command]
-pub fn fs_write_file(loc: Location, contents: String) -> FsResult<()> {
+pub async fn fs_write_file(loc: Location, contents: String) -> FsResult<()> {
     backend_for(&loc.host).write_file(&loc.path, &contents)
 }
 #[tauri::command]
-pub fn fs_stat(loc: Location) -> FsResult<FileStat> {
+pub async fn fs_stat(loc: Location) -> FsResult<FileStat> {
     backend_for(&loc.host).stat(&loc.path)
 }
 #[tauri::command]
-pub fn fs_rename(from: Location, to: Location) -> FsResult<()> {
+pub async fn fs_rename(from: Location, to: Location) -> FsResult<()> {
     if from.host != to.host {
         return Err("rename across hosts not supported".into());
     }
     backend_for(&from.host).rename(&from.path, &to.path)
 }
 #[tauri::command]
-pub fn fs_delete(loc: Location) -> FsResult<()> {
+pub async fn fs_delete(loc: Location) -> FsResult<()> {
     backend_for(&loc.host).delete(&loc.path)
 }
 #[tauri::command]
-pub fn fs_create_dir(loc: Location) -> FsResult<()> {
+pub async fn fs_create_dir(loc: Location) -> FsResult<()> {
     backend_for(&loc.host).create_dir(&loc.path)
 }
 #[tauri::command]

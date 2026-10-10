@@ -1,0 +1,18 @@
+.lsp-list { height: 100%; overflow: auto; outline: none; font-size: 13px; }
+.lsp-tabs { display: flex; gap: 2px; padding: 3px 8px; border-bottom: 1px solid var(--border); }
+.lsp-tab { padding: 1px 10px; border-radius: 4px; color: var(--fg-dim); cursor: default; }
+.lsp-tab:hover { background: var(--bg-hover); }
+.lsp-tab.active { background: var(--bg-selected); color: var(--fg); }
+.lsp-panel { display: flex; flex-direction: column; height: 100%; }
+.lsp-file { height: var(--row-h); display: flex; align-items: center; gap: 6px; padding: 0 10px; font-weight: 500; }
+.lsp-file .dim, .lsp-row .dim { color: var(--fg-faint); font-weight: 400; }
+.lsp-row { height: var(--row-h); display: flex; align-items: center; gap: 6px; padding: 0 10px 0 28px; white-space: nowrap; margin: 0 4px; border-radius: 4px; }
+.lsp-row .msg { overflow: hidden; text-overflow: ellipsis; }
+.lsp-row:hover { background: var(--bg-hover); }
+.lsp-row.selected { background: var(--bg-selected); }
+.lsp-empty { padding: 12px 14px; color: var(--fg-dim); }
+.lsp-sev { width: 14px; height: 14px; flex: none; }
+.sb-lsp { cursor: default; }
+.sb-lsp.warn { color: var(--nord13); }
+.sb-lsp .n { display: inline-flex; align-items: center; gap: 3px; }
+.lsp-kind { width: 16px; height: 16px; border-radius: 3px; display: inline-grid; place-content: center; font-size: 10px; font-weight: 600; color: var(--nord0); background: var(--nord9); flex: none; }

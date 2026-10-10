@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useSyncExternalStore } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useStore } from "./lib/store";
-import { initProject, openProject, pickAndOpenFolder, projectKey, projectName, projectStore } from "./lib/project";
+import { initProject, openProject, openRemoteProject, pickAndOpenFolder, projectKey, projectName, projectStore } from "./lib/project";
 import { layoutStore } from "./lib/layout";
 import { getToolWindow, listToolWindows, subscribeToolWindows } from "./toolwindows/registry";
 import { Toolbar } from "./components/shell/Toolbar";
@@ -20,6 +20,7 @@ function Welcome() {
     <div className="welcome">
       <h1>Atelier</h1>
       <button className="primary" onClick={pickAndOpenFolder}>Open Folder…</button>
+      <button onClick={openRemoteProject}>Open Remote Project…</button>
       {recent.length > 0 && <div className="welcome-recent">
         <div className="popup-section">Recent projects</div>
         {recent.map((l) => (

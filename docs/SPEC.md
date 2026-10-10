@@ -48,7 +48,7 @@ The editor, file tree, search, terminal and Claude panel all take a Location so 
    (RenameElement: shift F6 and `p`; only the first is applied in-editor, `p` only when editor not focused).
    Keymap is data: `src/keymap/intellij-macos.json` (actionId -> shortcuts), mapped to Atelier
    actions via a registry. Unmapped IntelliJ actions are ignored. Settings UI can rebind.
-10. Tool window layout like IntelliJ: left (Project ⌘1, Remote Files, Claude), bottom (Terminal, Find, Git,
+10. Tool window layout like IntelliJ: left (Project ⌘1, Remote Files), right (Claude ⌃⌥C), bottom (Terminal, Find, Git,
     Problems ⌘6), stripes with toggles, resizable, state persisted per project.
 
 ## Module ownership (parallel agents must stay inside their files)

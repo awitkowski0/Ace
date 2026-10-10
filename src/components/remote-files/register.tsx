@@ -1,7 +1,8 @@
-// Owned by the remote-files agent: replace the placeholder below with the real component (keep this file's registrations).
 import { registerToolWindow } from "../../toolwindows/registry";
+import { registerAction } from "../../actions/registry";
+import { openRemoteProject } from "../../lib/project";
 import { CloudIcon } from "../shell/icons";
-import { Placeholder } from "../shell/Placeholder";
+import { RemoteFiles } from "./RemoteFiles";
 
 registerToolWindow({
   id: "remote-files",
@@ -10,5 +11,7 @@ registerToolWindow({
   side: "left",
   actionId: "ActivateRemoteFilesToolWindow",
   order: 2,
-  component: () => <Placeholder name="Remote Files" />,
+  component: () => <RemoteFiles />,
 });
+
+registerAction({ id: "OpenRemoteProject", title: "Open Remote Project…", run: openRemoteProject });

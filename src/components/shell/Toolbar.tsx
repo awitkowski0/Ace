@@ -1,5 +1,5 @@
 import { useStore } from "../../lib/store";
-import { openProject, pickAndOpenFolder, projectName, projectStore } from "../../lib/project";
+import { openProject, openRemoteProject, pickAndOpenFolder, projectName, projectStore } from "../../lib/project";
 import { shellStore } from "../../lib/shell";
 import { showContextMenu } from "./contextMenu";
 import { runAction } from "../../actions/registry";
@@ -20,6 +20,7 @@ export function Toolbar() {
           const r = e.currentTarget.getBoundingClientRect();
           showContextMenu(r.left, r.bottom + 2, [
             { label: "Open Folder…", run: pickAndOpenFolder },
+            { label: "Open Remote Project…", run: openRemoteProject },
             { separator: true, label: "" },
             ...recent.map((l) => ({ label: `${projectName(l)}  —  ${l.host === "local" ? l.path.replace(/^\/Users\/[^/]+/, "~") : `${l.host}:${l.path}`}`, run: () => openProject(l) })),
           ]);
@@ -29,7 +30,7 @@ export function Toolbar() {
         <span>{root ? projectName(root) : "Atelier"}</span>
         <ChevronDown />
       </button>
-      <button className="widget" title="Git branch">
+      <button className="widget" title="Git branch" onClick={() => runAction("Git.Branches")}>
         <BranchIcon />
         <span>{branch ?? "No VCS"}</span>
         <ChevronDown />

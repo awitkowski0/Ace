@@ -1,0 +1,24 @@
+.claude-panel { display: flex; flex-direction: column; height: 100%; outline: none; }
+.claude-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.claude-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.claude-seg button { height: 22px; padding: 0 9px; color: var(--fg-dim); font-size: 12px; }
+.claude-seg button:hover { background: var(--bg-hover); color: var(--fg); }
+.claude-seg button.on { background: var(--bg-selected); color: var(--fg); }
+.claude-bar select { height: 22px; background: var(--bg-input); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.claude-search { margin: 6px 8px; height: 24px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; color: var(--fg); outline: none; font-size: 12px; }
+.claude-search:focus { border-color: var(--accent-bg); }
+.claude-list { flex: 1; overflow: auto; min-height: 0; }
+.claude-group { display: flex; align-items: center; gap: 4px; height: var(--row-h); padding: 0 8px; cursor: default; font-weight: 600; white-space: nowrap; }
+.claude-group:hover { background: var(--bg-hover); }
+.claude-group .path { color: var(--fg-faint); font-weight: 400; overflow: hidden; text-overflow: ellipsis; margin-left: 6px; }
+.claude-group .count { margin-left: auto; color: var(--fg-faint); font-weight: 400; padding-left: 8px; }
+.claude-row { padding: 3px 8px 3px 24px; cursor: default; display: flex; flex-direction: column; gap: 1px; }
+.claude-row:hover { background: var(--bg-hover); }
+.claude-row.sel { background: var(--bg-selected); }
+.claude-row .t { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.claude-row .t span.txt { overflow: hidden; text-overflow: ellipsis; }
+.claude-row .m { color: var(--fg-faint); font-size: 11px; display: flex; gap: 8px; white-space: nowrap; overflow: hidden; }
+.claude-badge { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--nord14); color: var(--nord0); flex: none; }
+.claude-badge.host { background: var(--nord3); color: var(--fg); }
+.claude-empty { padding: 16px; color: var(--fg-dim); }
+.claude-err { padding: 6px 8px; color: var(--nord11); font-size: 12px; }

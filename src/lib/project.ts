@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { createStore } from "./store";
-import { basename, fs, local, locKey, type Location } from "./ipc";
+import { basename, fs, invoke, local, locKey, type Location } from "./ipc";
 
 const RECENT_KEY = "atelier.recent";
 
@@ -29,7 +29,7 @@ export async function openProject(loc: Location) {
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
   } catch {}
   projectStore.set({ root: loc, recent });
-  if (loc.host === "local") fs.watch(loc).catch((e) => console.warn("watch failed", e));
+  fs.watch(loc).catch((e) => console.warn("watch failed", e));
 }
 
 export function closeProject() {
@@ -43,6 +43,29 @@ export async function pickAndOpenFolder() {
   if (typeof dir === "string") await openProject(local(dir));
 }
 
+/** Parse "mc:/srv/app" / "host:~/x" / "ssh://host/path" into a Location (null if not remote syntax). */
+export function parseRemote(text: string): Location | null {
+  const t = text.trim();
+  const m = /^(?:ssh:\/\/)?([A-Za-z0-9._-]+)[:](\/.*|~.*)$/.exec(t) ?? /^ssh:\/\/([A-Za-z0-9._-]+)(\/.*)$/.exec(t);
+  return m ? { host: m[1], path: m[2].length > 1 ? m[2].replace(/\/+$/, "") : m[2] } : null;
+}
+
+/** "Open Remote Project…": prompt for `host:/path` (e.g. `mc:/home/alexw/app`) and open it as the project root. */
+export async function openRemoteProject() {
+  const { promptDialog } = await import("../components/shell/dialogs");
+  const text = await promptDialog({ title: "Open Remote Project (host:/path)", initial: "mc:~", okLabel: "Open" });
+  if (!text) return;
+  const loc = parseRemote(text);
+  if (!loc) return void alert("Use the form host:/absolute/path, e.g. mc:/home/alexw");
+  if (loc.path === "~" || loc.path.startsWith("~/")) {
+    const home = await invoke<string>("remote_home", { host: loc.host }).catch(() => null);
+    if (home) loc.path = loc.path === "~" ? home : home + loc.path.slice(1);
+  }
+  const st = await fs.stat(loc).catch(() => null);
+  if (!st?.exists || !st.isDir) return void alert(`${loc.host}:${loc.path} is not a directory`);
+  await openProject(loc);
+}
+
 /** Startup: most recent project, else ~/thematic-kyf in dev, else welcome screen. */
 let inited = false;
 export async function initProject() {
@@ -50,8 +73,10 @@ export async function initProject() {
   inited = true;
   const { recent } = projectStore.get();
   for (const r of recent) {
-    if (r.host !== "local") continue; // remote reopen is handled once remote fs exists
-    const st = await fs.stat(r).catch(() => null);
+    const st = await Promise.race([
+      fs.stat(r).catch(() => null),
+      r.host === "local" ? new Promise<null>(() => {}) : new Promise<null>((res) => setTimeout(() => res(null), 4000)),
+    ]);
     if (st?.exists && st.isDir) {
       await openProject(r);
       projectStore.set({ ready: true });

@@ -23,7 +23,7 @@ fn noisy(p: &str) -> bool {
 #[tauri::command]
 pub fn fs_watch(app: AppHandle, state: State<WatchState>, loc: Location) -> Result<(), String> {
     if !loc.is_local() {
-        return Err("remote watch not implemented".into());
+        return crate::remote::watch::watch(app, loc);
     }
     let root = loc.path.clone();
     let mut map = state.0.lock().unwrap();
@@ -62,6 +62,10 @@ pub fn fs_watch(app: AppHandle, state: State<WatchState>, loc: Location) -> Resu
 
 #[tauri::command]
 pub fn fs_unwatch(state: State<WatchState>, loc: Location) -> Result<(), String> {
+    if !loc.is_local() {
+        crate::remote::watch::unwatch(&loc);
+        return Ok(());
+    }
     state.0.lock().unwrap().remove(&loc.path);
     Ok(())
 }
