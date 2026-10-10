@@ -1,4 +1,4 @@
-import { layoutStore, setActive, toggleToolWindow, focusToolWindow } from "../../lib/layout";
+import { layoutStore, setActive, toggleToolWindow, clickToolWindow, focusToolWindow } from "../../lib/layout";
 import { getToolWindow } from "../../toolwindows/registry";
 
 /**
@@ -21,9 +21,13 @@ export const activeMemberOf = (id: string): string | null => {
   return cur && liveGroup(id).includes(cur) ? cur : null;
 };
 
-/** Stripe click / Activate<X>ToolWindow: toggle the group as one window, remembering which tab was showing. */
+/** Activate<X>ToolWindow (keyboard): toggle the group as one window, remembering which tab was showing. */
 export function toggleGroup(id: string) {
   toggleToolWindow(activeMemberOf(id) ?? id);
+}
+/** Stripe-button click: re-clicking the button of a visible tool window (or group) closes it. */
+export function clickGroup(id: string) {
+  clickToolWindow(activeMemberOf(id) ?? id);
 }
 export function selectGroupTab(id: string) {
   const tw = getToolWindow(id);

@@ -24,7 +24,11 @@ enum Handle {
     Killer(Box<dyn FnMut() + Send>),
 }
 
+/// Owner of every child registered without an explicit window: killed only when the app exits.
+pub const APP_OWNER: &str = "app";
+
 struct Entry {
+    owner: String,
     kind: String,
     label: String,
     pid: Option<u32>,
@@ -35,6 +39,7 @@ struct Entry {
 #[derive(Serialize, Clone)]
 pub struct TrackedProc {
     pub id: u64,
+    pub owner: String,
     pub kind: String,
     pub label: String,
     pub pid: Option<u32>,
@@ -52,21 +57,38 @@ fn reg() -> &'static Mutex<Registry> {
 }
 
 pub fn register(kind: &str, label: &str, child: Child) -> u64 {
+    register_for(APP_OWNER, kind, label, child)
+}
+
+/// Like `register`, but tagged with the window label that owns the child: `kill_owner(label)` kills it when that
+/// window closes (the app-wide `kill_all` still takes everything).
+pub fn register_for(owner: &str, kind: &str, label: &str, child: Child) -> u64 {
     let pid = Some(child.id());
-    insert(kind, label, pid, Handle::Child(child))
+    insert(owner, kind, label, pid, Handle::Child(child))
 }
 
 /// Register an arbitrary kill closure (called once on kill / app exit).
 pub fn register_killer(kind: &str, label: &str, pid: Option<u32>, killer: Box<dyn FnMut() + Send>) -> u64 {
-    insert(kind, label, pid, Handle::Killer(killer))
+    register_killer_for(APP_OWNER, kind, label, pid, killer)
 }
 
-fn insert(kind: &str, label: &str, pid: Option<u32>, handle: Handle) -> u64 {
+pub fn register_killer_for(owner: &str, kind: &str, label: &str, pid: Option<u32>, killer: Box<dyn FnMut() + Send>) -> u64 {
+    insert(owner, kind, label, pid, Handle::Killer(killer))
+}
+
+/// Move a registered child to another owner (e.g. a shared Godot that outlives the window that started it).
+pub fn set_owner(id: u64, owner: &str) {
+    if let Some(e) = reg().lock().unwrap().map.get_mut(&id) {
+        e.owner = owner.into();
+    }
+}
+
+fn insert(owner: &str, kind: &str, label: &str, pid: Option<u32>, handle: Handle) -> u64 {
     let mut r = reg().lock().unwrap();
     r.next += 1;
     let id = r.next;
     let start = pid.and_then(proc_start);
-    r.map.insert(id, Entry { kind: kind.into(), label: label.into(), pid, start, handle });
+    r.map.insert(id, Entry { owner: owner.into(), kind: kind.into(), label: label.into(), pid, start, handle });
     persist(&r);
     id
 }
@@ -88,6 +110,20 @@ pub fn kill(id: u64) {
     if let Some(e) = e {
         kill_entries(vec![e]);
     }
+}
+
+/// Kill every child registered for `owner` (a window label). Returns how many entries were killed.
+pub fn kill_owner(owner: &str) -> usize {
+    let entries: Vec<Entry> = {
+        let mut r = reg().lock().unwrap();
+        let ids: Vec<u64> = r.map.iter().filter(|(_, e)| e.owner == owner).map(|(i, _)| *i).collect();
+        let v: Vec<Entry> = ids.iter().filter_map(|i| r.map.remove(i)).collect();
+        persist(&r);
+        v
+    };
+    let n = entries.len();
+    kill_entries(entries);
+    n
 }
 
 pub fn kill_all() {
@@ -336,6 +372,7 @@ pub fn install() {
                 if let Some(p) = own_file() {
                     let _ = std::fs::remove_file(p);
                 }
+                crate::windows::on_signal_exit();
                 std::process::exit(128 + sig);
             }
         });
@@ -352,7 +389,7 @@ pub fn pid(id: u64) -> Option<u32> {
 
 pub fn list() -> Vec<TrackedProc> {
     reg().lock().unwrap().map.iter().map(|(id, e)| TrackedProc {
-        id: *id, kind: e.kind.clone(), label: e.label.clone(), pid: e.pid,
+        id: *id, owner: e.owner.clone(), kind: e.kind.clone(), label: e.label.clone(), pid: e.pid,
     }).collect()
 }
 

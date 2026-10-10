@@ -2,13 +2,15 @@
 import { key, tap } from "./keys";
 import { editorStore, openFile } from "../editor/store";
 import { activeEditor } from "../editor/editorRegistry";
-import { projectStore, openProject } from "../lib/project";
+import { projectStore, openProject, openProjectFlow } from "../lib/project";
 import { layoutStore, focusedToolWindowId, setActive } from "../lib/layout";
-import { listActions } from "../actions/registry";
+import { listActions, runAction } from "../actions/registry";
 import { getBindings } from "../actions/keymap";
 import { local, invoke } from "../lib/ipc";
 import { searchText } from "../components/search/api";
 import { openPopup, closePopup } from "../components/shell/popups";
+import { myLabel, windows } from "../lib/windows";
+import { listen } from "../lib/ipc";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const raf = () => new Promise<number>((r) => requestAnimationFrame(r));
@@ -50,6 +52,7 @@ function state() {
   const ed = activeEditor();
   const pos = ed?.getPosition();
   return {
+    window: myLabel(),
     project: projectStore.get().root,
     tabs: Object.values(e.groups).map((g) => ({
       group: g.id,
@@ -199,6 +202,15 @@ export function installQaHarness() {
     key, tap, type, sleep, waitFor, state, actions, raf, afterPaint, reset, models,
     openFile: openFileQa, invoke, afterPaintX: afterPaint, measureSearchEverywhere, measureFindInFiles, measureTree, searchText, openProject: (p: string) => openProject(local(p)), measureOpen, measureKeystroke,
     editor: () => activeEditor(),
-    version: 1,
+    /** project windows (tab order) with project + which one is active; `winDebug()` = AppKit tabbing facts for this window */
+    windows: () => windows.list(),
+    /** user-level open (dedupe + This/New Window dialog); `mode` skips the dialog */
+    openFlow: (p: string, mode?: "this" | "new") => openProjectFlow(local(p), mode),
+    runAction,
+    winDebug: () => invoke<any>("win_debug"),
+    label: myLabel,
+    /** the app's own window-scoped listen (what every module uses) */
+    listen,
+    version: 2,
   };
 }

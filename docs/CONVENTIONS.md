@@ -63,6 +63,21 @@ Instead (being built by the harness agent; contract fixed here):
   focused element), `tap("Shift")`, `type(text)` (Monaco: via `editor.trigger("keyboard","type",{text})`; inputs: value+input
   event), `waitFor(selectorOrFn, ms)`, `state()` (project, open tabs + dirty flags, active tool windows, focused area,
   open popup id, cursor position), `reset(path?)` (baseline: no popup, Project visible, no right/bottom tool window, `path` open + focused; smoke calls it before every check), `models(evict?)` (live Monaco models), `actions()` (registered action ids + resolved keys), `sleep(ms)`.
+- Multi-project: one project per window (`project-<n>`), native macOS tabs. Requests may target a window with an optional FIRST line
+  `{"window":"project-2"}` before the JS body (`node scripts/qa/eval.mjs --window project-2 '...'`, lib.mjs `app.evIn(label, body)` /
+  `app.ev(body, {window})`); default = the active (last focused) project window. `__qa.windows()` lists windows (tab order, project,
+  focused), `__qa.winDebug()` returns AppKit facts (tabbingIdentifier, tabbingMode, tabbedWindows, Window-menu titles), `__qa.openFlow(path, mode?)`
+  is the user-level open (dedupe + This/New Window dialog), `__qa.runAction(id)`, `__qa.listen` (the window-scoped listen). Harness launches get their own
+  `ATELIER_DATA_DIR` (session.json) and single-instance identity (derived from the automation socket), so they never touch a real Atelier;
+  a second `atelier <path>` with the same env joins the first instance. `scripts/qa/multiproject.mjs` is the multi-project suite.
 - `scripts/qa/shot.sh <name>` captures the Atelier window (works while unfocused) into `scripts/qa/out/<name>.png`.
 - QA runs that open Alex's real projects must never save: check `state()` has no dirty tabs before closing, and
   `git -C <project> status --porcelain` before/after must be identical.
+
+## Multi-project windows (read before adding events/commands)
+- Frontend `listen` (from `src/lib/ipc.ts`) is window-scoped. Never import `listen` from `@tauri-apps/api/event`: its default `Any` target also receives `emit_to(other window)`.
+- Rust: a command that spawns work or streams events takes `window: tauri::WebviewWindow` and emits with `windows::emit_window(app, label, event, payload)`
+  (or `emit_windows` for a shared resource's label set). Children: `procs::register_for(label, ..)` / `register_killer_for`, so closing the window kills them
+  (`procs::kill_owner`); plain `register*` = owner "app" (killed on quit only). Shared resources (fs watcher, search index, Godot per root, ssh master, claude
+  watcher) keep a set of window labels and expose `release_window(label)`, which `windows::cleanup_window` calls on close.
+- No menu accelerators for keys owned by the JS keymap (they would be consumed by AppKit before the webview). Window state/session: `src-tauri/src/windows.rs`.

@@ -1,8 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { createStore } from "./store";
-import { basename, fs, invoke, local, locKey, type Location } from "./ipc";
+import { basename, fs, invoke, local, locKey, sameLoc, type Location } from "./ipc";
+import { windows } from "./windows";
 
 const RECENT_KEY = "atelier.recent";
+const OPEN_IN_KEY = "atelier.openIn";
+const MAX_RECENT = 10;
 
 function readRecent(): Location[] {
   try {
@@ -18,17 +21,27 @@ export const projectStore = createStore<{ root: Location | null; recent: Locatio
   ready: false,
 });
 
+// The recent list is shared by all project windows (same localStorage): keep this window's copy current.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === RECENT_KEY) projectStore.set({ recent: readRecent() });
+  });
+}
+
 export const projectName = (l: Location) => basename(l.path) || l.path;
 export const projectKey = (l: Location) => locKey(l);
 
+/** Open `loc` IN THIS WINDOW without any question (startup, harness, empty Welcome window). Use openProjectFlow for user actions. */
 export async function openProject(loc: Location) {
   const prev = projectStore.get().root;
   if (prev) fs.unwatch(prev).catch(() => {});
-  const recent = [loc, ...projectStore.get().recent.filter((r) => locKey(r) !== locKey(loc))].slice(0, 10);
+  // read-modify-write against storage, never against this window's possibly stale copy
+  const recent = [loc, ...readRecent().filter((r) => locKey(r) !== locKey(loc))].slice(0, MAX_RECENT);
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
   } catch {}
   projectStore.set({ root: loc, recent });
+  windows.setProject(loc).catch(() => {});
   fs.watch(loc).catch((e) => console.warn("watch failed", e));
 }
 
@@ -36,11 +49,78 @@ export function closeProject() {
   const prev = projectStore.get().root;
   if (prev) fs.unwatch(prev).catch(() => {});
   projectStore.set({ root: null });
+  windows.setProject(null).catch(() => {});
+}
+
+export type OpenIn = "ask" | "this" | "new";
+/** IntelliJ "Open project in" preference. Default New Window (which macOS merges into a native tab). */
+export function getOpenIn(): OpenIn {
+  try {
+    const v = localStorage.getItem(OPEN_IN_KEY);
+    return v === "this" || v === "new" ? v : "ask";
+  } catch {
+    return "ask";
+  }
+}
+export function setOpenIn(v: OpenIn) {
+  try {
+    localStorage.setItem(OPEN_IN_KEY, v);
+  } catch {}
+}
+
+const displayPath = (l: Location) => (l.host === "local" ? l.path.replace(/^\/Users\/[^/]+/, "~") : `${l.host}:${l.path}`);
+
+/**
+ * User-initiated open (Open Folder, recent list, project switcher), IntelliJ semantics:
+ *  - the project is already open in some window -> focus that window/tab, never a second copy;
+ *  - this window is empty (Welcome) -> open here;
+ *  - otherwise ask "This Window / New Window" (remembered when "Do not ask again" is ticked; default New Window,
+ *    which becomes a native tab of the current frame).
+ */
+export async function openProjectFlow(loc: Location, mode?: "this" | "new"): Promise<void> {
+  const root = projectStore.get().root;
+  if (root && sameLoc(root, loc)) return;
+  const wins = await windows.list().catch(() => []);
+  const existing = wins.find((w) => w.project && sameLoc(w.project, loc));
+  if (existing) {
+    await windows.focus(existing.label);
+    return;
+  }
+  if (!root) return openProject(loc);
+  let choice: "this" | "new" | null = mode ?? null;
+  if (!choice) {
+    const pref = getOpenIn();
+    if (pref !== "ask") choice = pref;
+    else {
+      const { choiceDialog } = await import("../components/shell/dialogs");
+      const r = await choiceDialog({
+        title: "Open Project",
+        message: `Open ${projectName(loc)} (${displayPath(loc)}) in:`,
+        buttons: [
+          { label: "This Window", value: "this" },
+          { label: "New Window", value: "new", primary: true },
+          { label: "Cancel", value: null },
+        ],
+        checkbox: "Do not ask again",
+      });
+      if (!r.value) return;
+      choice = r.value as "this" | "new";
+      if (r.checked) setOpenIn(choice);
+    }
+  }
+  if (choice === "new") {
+    const r = await windows.open(loc, true);
+    if (r.action !== "here") return;
+    return openProject(loc);
+  }
+  const { confirmWindowClose } = await import("./windowLifecycle");
+  if (!(await confirmWindowClose("switch"))) return;
+  await windows.switchHere(loc);
 }
 
 export async function pickAndOpenFolder() {
   const dir = await open({ directory: true, multiple: false, title: "Open Folder" });
-  if (typeof dir === "string") await openProject(local(dir));
+  if (typeof dir === "string") await openProjectFlow(local(dir));
 }
 
 /** Parse "mc:/srv/app" / "host:~/x" / "ssh://host/path" into a Location (null if not remote syntax). */
@@ -63,36 +143,15 @@ export async function openRemoteProject() {
   }
   const st = await fs.stat(loc).catch(() => null);
   if (!st?.exists || !st.isDir) return void alert(`${loc.host}:${loc.path} is not a directory`);
-  await openProject(loc);
+  await openProjectFlow(loc);
 }
 
-/** Startup: most recent project, else ~/thematic-kyf in dev, else welcome screen. */
+/** Startup: the project Rust assigned to this window (argv, restored session or an open request); else the Welcome screen. */
 let inited = false;
 export async function initProject() {
   if (inited) return;
   inited = true;
   const arg = await fs.launchLocation().catch(() => null);
-  if (arg) {
-    await openProject(arg);
-    projectStore.set({ ready: true });
-    return;
-  }
-  const { recent } = projectStore.get();
-  for (const r of recent) {
-    const st = await Promise.race([
-      fs.stat(r).catch(() => null),
-      r.host === "local" ? new Promise<null>(() => {}) : new Promise<null>((res) => setTimeout(() => res(null), 4000)),
-    ]);
-    if (st?.exists && st.isDir) {
-      await openProject(r);
-      projectStore.set({ ready: true });
-      return;
-    }
-  }
-  if (import.meta.env.DEV) {
-    const def = local(`${await fs.home()}/thematic-kyf`);
-    const st = await fs.stat(def).catch(() => null);
-    if (st?.exists && st.isDir) await openProject(def);
-  }
+  if (arg) await openProject(arg);
   projectStore.set({ ready: true });
 }

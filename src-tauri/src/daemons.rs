@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-use tauri::Emitter;
 
 const GRADLE_MAIN: &str = "org.gradle.launcher.daemon.bootstrap.GradleDaemon";
 
@@ -860,15 +859,16 @@ impl ScanEvent {
 
 /// Starts a background scan; results stream as `daemons://cleanup` events. Returns immediately.
 #[tauri::command]
-pub fn daemons_cleanup_scan(app: tauri::AppHandle, host: String, scan: String, extra_roots: Option<Vec<String>>) {
+pub fn daemons_cleanup_scan(app: tauri::AppHandle, window: tauri::WebviewWindow, host: String, scan: String, extra_roots: Option<Vec<String>>) {
     let extra = extra_roots.unwrap_or_default();
+    let label = window.label().to_string();
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
-    if let Some(old) = scans().lock().unwrap().insert(host.clone(), cancel.clone()) {
+    if let Some(old) = scans().lock().unwrap().insert(scan_key(&label, &host), cancel.clone()) {
         old.store(true, Ordering::Relaxed);
     }
     tauri::async_runtime::spawn_blocking(move || {
         let emit = |e: ScanEvent| {
-            let _ = app.emit("daemons://cleanup", e);
+            crate::windows::emit_window(&app, &label, "daemons://cleanup", e);
         };
         let res: Result<(), String> = (|| {
             let running = running_versions(&host)?;
@@ -926,10 +926,26 @@ pub fn daemons_cleanup_scan(app: tauri::AppHandle, host: String, scan: String, e
 }
 
 #[tauri::command]
-pub fn daemons_cleanup_cancel(host: String) {
-    if let Some(c) = scans().lock().unwrap().remove(&host) {
+pub fn daemons_cleanup_cancel(window: tauri::WebviewWindow, host: String) {
+    if let Some(c) = scans().lock().unwrap().remove(&scan_key(window.label(), &host)) {
         c.store(true, Ordering::Relaxed);
     }
+}
+
+fn scan_key(window: &str, host: &str) -> String {
+    format!("{window}\u{0}{host}")
+}
+
+/// A window closed: cancel the cleanup scans it started.
+pub fn release_window(label: &str) {
+    let prefix = format!("{label}\u{0}");
+    scans().lock().unwrap().retain(|k, c| {
+        let mine = k.starts_with(&prefix);
+        if mine {
+            c.store(true, Ordering::Relaxed);
+        }
+        !mine
+    });
 }
 
 #[derive(Serialize, Debug)]

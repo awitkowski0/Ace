@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 // ---------- runner ----------
 
@@ -368,12 +368,12 @@ struct OutEv { job: u64, line: String }
 #[derive(Serialize, Clone)]
 struct DoneEv { job: u64, op: String, ok: bool, code: Option<i32> }
 
-fn pump(mut r: impl Read + Send + 'static, app: AppHandle, job: u64) -> std::thread::JoinHandle<()> {
+fn pump(mut r: impl Read + Send + 'static, app: AppHandle, label: String, job: u64) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let (mut buf, mut cur) = ([0u8; 4096], Vec::<u8>::new());
         let flush = |cur: &mut Vec<u8>| {
             if !cur.is_empty() {
-                let _ = app.emit("git://output", OutEv { job, line: String::from_utf8_lossy(cur).into_owned() });
+                crate::windows::emit_window(&app, &label, "git://output", OutEv { job, line: String::from_utf8_lossy(cur).into_owned() });
                 cur.clear();
             }
         };
@@ -389,10 +389,11 @@ fn pump(mut r: impl Read + Send + 'static, app: AppHandle, job: u64) -> std::thr
 
 /// op: "fetch" | "pull" | "push". `args` are extra flags/refspecs. Returns the job id (= process registry id).
 #[tauri::command]
-pub async fn git_stream(app: AppHandle, root: Location, op: String, args: Vec<String>) -> Result<u64, String> {
+pub async fn git_stream(app: AppHandle, window: tauri::WebviewWindow, root: Location, op: String, args: Vec<String>) -> Result<u64, String> {
     if !matches!(op.as_str(), "fetch" | "pull" | "push") {
         return Err(format!("unsupported op {op}"));
     }
+    let label = window.label().to_string();
     blocking(move || {
         let mut a = vec![op.clone(), "--progress".to_string()];
         a.extend(args);
@@ -410,12 +411,12 @@ pub async fn git_stream(app: AppHandle, root: Location, op: String, args: Vec<St
         let (so, se, pid) = (child.stdout.take(), child.stderr.take(), child.id());
         let child = Arc::new(Mutex::new(child));
         let kc = child.clone();
-        let job = procs::register_killer("git", &format!("git {op} ({})", root.path), Some(pid), Box::new(move || {
+        let job = procs::register_killer_for(&label, "git", &format!("git {op} ({})", root.path), Some(pid), Box::new(move || {
             let _ = kc.lock().unwrap().kill();
         }));
         let mut hs = vec![];
-        if let Some(s) = so { hs.push(pump(s, app.clone(), job)); }
-        if let Some(s) = se { hs.push(pump(s, app.clone(), job)); }
+        if let Some(s) = so { hs.push(pump(s, app.clone(), label.clone(), job)); }
+        if let Some(s) = se { hs.push(pump(s, app.clone(), label.clone(), job)); }
         std::thread::spawn(move || {
             for h in hs { let _ = h.join(); }
             let code = loop {
@@ -427,7 +428,7 @@ pub async fn git_stream(app: AppHandle, root: Location, op: String, args: Vec<St
                 std::thread::sleep(std::time::Duration::from_millis(20));
             };
             procs::unregister(job);
-            let _ = app.emit("git://done", DoneEv { job, op, ok: code == Some(0), code });
+            crate::windows::emit_window(&app, &label, "git://done", DoneEv { job, op, ok: code == Some(0), code });
         });
         Ok(job)
     })

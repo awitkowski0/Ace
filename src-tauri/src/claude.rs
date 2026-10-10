@@ -524,16 +524,21 @@ pub async fn claude_running(host: String) -> Result<Vec<RunningClaude>, String> 
     .map_err(|e| e.to_string())?
 }
 
-// ---- local watcher: emits `claude://changed` (debounced) ----
+// ---- local watcher: emits `claude://changed` (debounced) to the windows that asked for it ----
+// One watcher for the whole app (the sessions dir is global), reference counted by window label.
 fn watcher() -> &'static Mutex<Option<notify::RecommendedWatcher>> {
     static W: OnceLock<Mutex<Option<notify::RecommendedWatcher>>> = OnceLock::new();
     W.get_or_init(|| Mutex::new(None))
 }
+fn watchers() -> &'static Mutex<std::collections::BTreeSet<String>> {
+    static W: OnceLock<Mutex<std::collections::BTreeSet<String>>> = OnceLock::new();
+    W.get_or_init(Default::default)
+}
 
 #[tauri::command]
-pub fn claude_watch(app: tauri::AppHandle) -> Result<(), String> {
+pub fn claude_watch(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     use notify::{EventKind, Watcher};
-    use tauri::Emitter;
+    watchers().lock().unwrap().insert(window.label().to_string());
     let mut g = watcher().lock().unwrap();
     if g.is_some() {
         return Ok(());
@@ -544,7 +549,8 @@ pub fn claude_watch(app: tauri::AppHandle) -> Result<(), String> {
         while rx.recv().is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(700));
             while rx.try_recv().is_ok() {}
-            let _ = app.emit("claude://changed", ());
+            let labels = watchers().lock().unwrap().clone();
+            crate::windows::emit_windows(&app, labels.iter(), "claude://changed", ());
         }
     });
     let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -561,8 +567,20 @@ pub fn claude_watch(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn claude_unwatch() {
-    *watcher().lock().unwrap() = None; // dropping the watcher closes the channel and ends the debounce thread
+pub fn claude_unwatch(window: tauri::WebviewWindow) {
+    release_window(window.label());
+}
+
+/// Leave the shared watcher; the last window to leave drops it (which closes the channel and ends the debounce thread).
+pub fn release_window(label: &str) {
+    let empty = {
+        let mut w = watchers().lock().unwrap();
+        w.remove(label);
+        w.is_empty()
+    };
+    if empty {
+        *watcher().lock().unwrap() = None;
+    }
 }
 
 #[tauri::command]

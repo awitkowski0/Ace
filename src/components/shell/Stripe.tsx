@@ -1,7 +1,7 @@
 import "./shell.css";
 import { useStore } from "../../lib/store";
 import { layoutStore } from "../../lib/layout";
-import { activeMemberOf, isGroupedFollower, toggleGroup } from "./toolGroups";
+import { activeMemberOf, clickGroup, isGroupedFollower } from "./toolGroups";
 import { listToolWindows, subscribeToolWindows, type Side } from "../../toolwindows/registry";
 import { useSyncExternalStore } from "react";
 import { keysFor } from "../../actions/keymap";
@@ -17,7 +17,7 @@ function Btn({ id }: { id: string }) {
   const actionId = tw.actionId ?? `Activate${tw.id.replace(/(^|[-_ ])(\w)/g, (_, __, c: string) => c.toUpperCase())}ToolWindow`;
   const k = keysFor(actionId)[0];
   return (
-    <button className={"stripe-btn" + (on ? " on" : "")} title={tw.title + (k ? `  ${formatKeystroke(k)}` : "")} onClick={() => toggleGroup(id)}>
+    <button className={"stripe-btn" + (on ? " on" : "")} title={tw.title + (k ? `  ${formatKeystroke(k)}` : "")} onClick={() => clickGroup(id)}>
       {tw.icon}
     </button>
   );

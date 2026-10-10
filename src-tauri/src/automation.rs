@@ -3,6 +3,9 @@
 //! accepts one request per connection: the raw bytes are an async JS function body, evaluated in the main
 //! webview; the reply is one JSON line `{"ok":bool,"value":<json>|"error":string}`.
 //! The webview returns values through the `qa_result` command. Timeout 30s.
+//! Window targeting: an optional FIRST line of the request that is a JSON object with a `window` key
+//! (`{"window":"project-2"}`) selects the project window; the rest of the request is the JS body. Without it the
+//! request runs in the active (last focused) project window, else the first one.
 //! A `<sock>.pid` file holds the app pid (used by scripts/qa/shot.sh).
 use parking_lot::Mutex;
 use serde_json::json;
@@ -20,7 +23,7 @@ pub fn enabled() -> bool {
     std::env::var("ATELIER_AUTOMATION").map(|v| !v.is_empty() && v != "0").unwrap_or(false)
 }
 
-type Pending = Mutex<HashMap<u64, Sender<Result<String, String>>>>;
+type Pending = Mutex<HashMap<u64, (String, Sender<Result<String, String>>)>>;
 fn pending() -> &'static Pending {
     static P: OnceLock<Pending> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
@@ -45,8 +48,19 @@ pub fn qa_result(id: u64, ok: bool, value: String) {
     if !enabled() {
         return;
     }
-    if let Some(tx) = pending().lock().remove(&id) {
+    if let Some((_, tx)) = pending().lock().remove(&id) {
         let _ = tx.send(if ok { Ok(value) } else { Err(value) });
+    }
+}
+
+/// A window was destroyed: requests still waiting for it fail now instead of timing out after 30s.
+pub fn window_gone(label: &str) {
+    let mut p = pending().lock();
+    let ids: Vec<u64> = p.iter().filter(|(_, (l, _))| l == label).map(|(i, _)| *i).collect();
+    for i in ids {
+        if let Some((_, tx)) = p.remove(&i) {
+            let _ = tx.send(Err(format!("window {label} closed")));
+        }
     }
 }
 
@@ -115,15 +129,34 @@ fn handle(app: AppHandle, mut conn: UnixStream) {
     let _ = conn.write_all(b"\n");
 }
 
-fn run_js(app: &AppHandle, body: &str) -> Result<String, String> {
-    let Some(win) = app.get_webview_window("main") else { return Err("no main window".into()) };
+/// Split an optional `{"window": "..."}` header line off the request.
+fn split_header(body: &str) -> (Option<String>, &str) {
+    let (first, rest) = body.split_once('\n').unwrap_or((body, ""));
+    if first.trim_start().starts_with('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(first) {
+            if let Some(w) = v.get("window").and_then(|w| w.as_str()) {
+                return (Some(w.to_string()), rest);
+            }
+        }
+    }
+    (None, body)
+}
+
+fn run_js(app: &AppHandle, request: &str) -> Result<String, String> {
+    let (target, body) = split_header(request);
+    let label = target
+        .or_else(crate::windows::active_label)
+        .filter(|l| app.get_webview_window(l).is_some())
+        .or_else(crate::windows::first_label)
+        .ok_or("no project window")?;
+    let Some(win) = app.get_webview_window(&label) else { return Err(format!("no window {label}")) };
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = channel();
-    pending().lock().insert(id, tx);
+    pending().lock().insert(id, (label.clone(), tx));
     let script = format!(
         "(async()=>{{const __id={id};const __send=(ok,v)=>window.__TAURI_INTERNALS__.invoke('qa_result',{{id:__id,ok,value:v}});\
-try{{const __r=await (async()=>{{\n{body}\n}})();let __s;try{{__s=JSON.stringify(__r===undefined?null:__r)}}catch(e){{__s=JSON.stringify(String(__r))}}\
-__send(true,__s===undefined?'null':__s)}}catch(e){{__send(false,String((e&&e.stack)||e))}}}})();"
+try{{for(let __i=0;__i<500&&!window.__qa;__i++)await new Promise(r=>setTimeout(r,20));const __r=await (async()=>{{\n{body}\n}})();let __s;try{{__s=JSON.stringify(__r===undefined?null:__r)}}catch(e){{__s=JSON.stringify(String(__r))}}\
+__send(true,__s===undefined?'null':__s)}}catch(e){{__send(false,String((e&&e.message)||e)+' | '+String((e&&e.stack)||''))}}}})();"
     );
     if let Err(e) = win.eval(&script) {
         pending().lock().remove(&id);

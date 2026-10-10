@@ -11,7 +11,7 @@ use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 use std::sync::Condvar;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 const COALESCE: Duration = Duration::from_millis(4);
 const MAX_CHUNK: usize = 64 * 1024;
@@ -26,6 +26,7 @@ struct Credit {
 }
 
 struct Session {
+    owner: String,
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     proc_id: u64,
@@ -112,7 +113,7 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
 }
 
 /// Core spawn path (also used by tests). Returns the session id.
-pub fn spawn_with(o: SpawnOpts, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> Result<String, String> {
+pub fn spawn_with(o: SpawnOpts, owner: &str, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> Result<String, String> {
     let id = o.id.clone().unwrap_or_else(|| format!("pty-{}", uuid_like()));
     let pair = native_pty_system()
         .openpty(PtySize { rows: o.rows.max(1), cols: o.cols.max(1), pixel_width: 0, pixel_height: 0 })
@@ -125,11 +126,11 @@ pub fn spawn_with(o: SpawnOpts, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> R
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let label = if o.host == "local" { "terminal".to_string() } else { format!("terminal@{}", o.host) };
-    let proc_id = crate::procs::register_killer("pty", &label, pid, Box::new(move || {
+    let proc_id = crate::procs::register_killer_for(owner, "pty", &label, pid, Box::new(move || {
         let _ = killer.kill();
     }));
     let credit = Arc::new(Credit { unacked: Mutex::new(0), cv: Condvar::new() });
-    sessions().lock().unwrap().insert(id.clone(), Session { writer, master: pair.master, proc_id, credit: credit.clone() });
+    sessions().lock().unwrap().insert(id.clone(), Session { owner: owner.to_string(), writer, master: pair.master, proc_id, credit: credit.clone() });
 
     let (tx, rx) = sync_channel::<Vec<u8>>(64);
     std::thread::Builder::new().name(format!("pty-read-{id}")).spawn(move || {
@@ -201,16 +202,23 @@ fn uuid_like() -> String {
 }
 
 #[tauri::command]
-pub fn pty_spawn(app: AppHandle, opts: SpawnOpts) -> Result<String, String> {
+pub fn pty_spawn(app: AppHandle, window: tauri::WebviewWindow, opts: SpawnOpts) -> Result<String, String> {
+    // Output goes to the window that spawned the terminal and to no other window.
+    let owner = window.label().to_string();
+    if opts.host != "local" {
+        crate::remote::ssh::acquire(&owner, &opts.host);
+    }
+    let label = owner.clone();
     let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |id, out| match out {
-        Out::Data(d) => {
-            let _ = app.emit(&format!("pty://data/{id}"), B64.encode(d));
-        }
-        Out::Exit(c) => {
-            let _ = app.emit(&format!("pty://exit/{id}"), c);
-        }
+        Out::Data(d) => crate::windows::emit_window(&app, &label, &format!("pty://data/{id}"), B64.encode(d)),
+        Out::Exit(c) => crate::windows::emit_window(&app, &label, &format!("pty://exit/{id}"), c),
     });
-    spawn_with(opts, sink)
+    spawn_with(opts, &owner, sink)
+}
+
+/// A window closed: drop its terminals (the children themselves are killed by `procs::kill_owner`).
+pub fn release_window(label: &str) {
+    sessions().lock().unwrap().retain(|_, s| s.owner != label);
 }
 
 #[tauri::command]
@@ -263,6 +271,7 @@ mod tests {
         });
         let id = spawn_with(
             SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, id: Some("t1".into()) },
+            "test",
             sink,
         )
         .unwrap();
@@ -295,6 +304,7 @@ mod tests {
         });
         spawn_with(
             SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, id: Some("fc1".into()) },
+            "test",
             sink,
         )
         .unwrap();
@@ -327,7 +337,7 @@ mod tests {
             let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
                 let _ = tx.lock().unwrap().send(o);
             });
-            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, id: Some("ssh1".into()) }, sink).unwrap();
+            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
             let mut text = Vec::new();
             let mut code = None;
             while let Ok(o) = rx.recv_timeout(Duration::from_secs(30)) {

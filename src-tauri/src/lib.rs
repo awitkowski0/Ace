@@ -5,21 +5,35 @@ mod fs;
 mod git;
 mod location;
 mod lsp;
+mod menu;
 mod procs;
 mod pty;
 mod remote;
 mod search;
+mod windows;
 
 pub use location::Location;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     procs::install();
+    let mut context = tauri::generate_context!();
+    // Harness runs must never talk to a real Atelier: with automation on, the single-instance socket is derived from the
+    // automation socket path (or ATELIER_INSTANCE_ID), so only processes sharing that socket form one instance.
+    if let Some(id) = instance_id() {
+        context.config_mut().identifier = format!("com.alexw.atelier.{id}");
+    }
     tauri::Builder::default()
+        // Must be the first plugin: a second `atelier <path>` hands its argv to this instance and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| windows::on_second_instance(app, argv, cwd)))
         .setup(|app| {
+            menu::install(app.handle())?;
             automation::start(app.handle());
+            windows::startup(app.handle());
             Ok(())
         })
+        .on_window_event(|window, event| windows::on_window_event(window, event))
+        .on_menu_event(|app, event| menu::on_event(app, &event.id().0))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         // ---- managed state (append one `.manage(...)` line per module under its marker) ----
@@ -48,6 +62,20 @@ pub fn run() {
             fs::watch::fs_unwatch,
             procs::procs_list,
             procs::procs_kill,
+            // == windows ==
+            windows::win_list,
+            windows::win_open_project,
+            windows::win_switch_here,
+            windows::win_set_project,
+            windows::win_focus,
+            windows::win_cycle,
+            windows::win_new_welcome,
+            windows::win_close_confirmed,
+            windows::win_close_cancelled,
+            windows::win_quit,
+            windows::win_debug,
+            windows::win_tabbed,
+            windows::project_branch,
             // == automation ==
             automation::qa_enabled,
             automation::qa_result,
@@ -118,13 +146,38 @@ pub fn run() {
             daemons::daemons_cleanup_cancel,
             daemons::daemons_cleanup_run,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Atelier")
-        .run(|_app, event| {
-            // Kill every tracked child (pty, ssh, LSP, claude) when the app exits.
-            if let tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
+                if windows::on_exit_requested(app, code) {
+                    api.prevent_exit();
+                }
+            }
+            // macOS open-file events: `open -a Atelier <folder>`, a folder dropped on the Dock icon.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => windows::on_opened(app, urls),
+            // Quitting (or the signal handler) kills every tracked child (pty, ssh, LSP, claude), whatever window owns it.
+            tauri::RunEvent::Ready => windows::activate(app),
+            tauri::RunEvent::Exit => {
                 procs::kill_all();
                 remote::ssh::close_all();
             }
+            _ => {}
         });
+}
+
+/// Isolation key for automation runs (None in normal use).
+fn instance_id() -> Option<String> {
+    if let Ok(id) = std::env::var("ATELIER_INSTANCE_ID") {
+        if !id.is_empty() {
+            return Some(id.chars().filter(|c| c.is_ascii_alphanumeric()).collect());
+        }
+    }
+    if automation::enabled() {
+        let sock = automation::sock_path();
+        let h = sock.to_string_lossy().bytes().fold(5381u64, |h, b| h.wrapping_mul(33) ^ b as u64);
+        return Some(format!("qa{h:x}"));
+    }
+    None
 }

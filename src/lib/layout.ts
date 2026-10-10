@@ -44,11 +44,19 @@ export const focusedToolWindowId = () =>
   listToolWindows().find((t) => isToolWindowFocused(t.id))?.id ?? null;
 
 export function focusToolWindow(id: string) {
-  requestAnimationFrame(() => {
+  // rAF waits for the tool window to mount; it never fires while the page is hidden (background tab / occluded window),
+  // so a short timer is the fallback: focus() still sets document.activeElement there.
+  let done = false;
+  const run = () => {
+    if (done) return;
     const e = el(id);
     if (!e) return;
+    done = true;
     (e.querySelector<HTMLElement>("[data-autofocus]") ?? e).focus();
-  });
+  };
+  requestAnimationFrame(run);
+  setTimeout(run, 60);
+  setTimeout(run, 250);
 }
 
 /** IntelliJ semantics: hidden -> show+focus; visible but unfocused -> focus; focused -> hide + focus editor. */
@@ -64,6 +72,19 @@ export function toggleToolWindow(id: string) {
   } else {
     setActive(tw.side, null);
     focusEditor();
+  }
+}
+/** Stripe-button click (IntelliJ mouse semantics): visible -> hide; hidden -> show + focus. Focus state is ignored because
+ *  pressing the button has already taken focus away from the tool window. */
+export function clickToolWindow(id: string) {
+  const tw = getToolWindow(id);
+  if (!tw) return;
+  if (layoutStore.get().active[tw.side] === id) {
+    setActive(tw.side, null);
+    focusEditor();
+  } else {
+    setActive(tw.side, id);
+    focusToolWindow(id);
   }
 }
 export function showToolWindow(id: string) {

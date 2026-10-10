@@ -66,6 +66,62 @@ pub fn exec_login(host: &str, cmd: &str) -> Result<String, String> {
     }
 }
 
+fn host_users() -> &'static Mutex<std::collections::BTreeMap<String, BTreeSet<String>>> {
+    static H: OnceLock<Mutex<std::collections::BTreeMap<String, BTreeSet<String>>>> = OnceLock::new();
+    H.get_or_init(Default::default)
+}
+
+fn close_master(host: &str) {
+    let _ = Command::new("ssh")
+        .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ConnectTimeout=2", "-O", "exit", host])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// A window starts using `host` (its project root or a terminal lives there). The multiplexed master is shared by all
+/// windows; it is closed when the last window that acquired it releases it (or closes).
+pub fn acquire(window: &str, host: &str) {
+    if host.is_empty() || host == "local" {
+        return;
+    }
+    host_users().lock().unwrap().entry(host.to_string()).or_default().insert(window.to_string());
+}
+
+/// Release one window's claim on `host`; closes the master when nobody else holds it.
+pub fn release(window: &str, host: &str) {
+    let last = {
+        let mut m = host_users().lock().unwrap();
+        match m.get_mut(host) {
+            Some(set) => {
+                set.remove(window);
+                let empty = set.is_empty();
+                if empty {
+                    m.remove(host);
+                }
+                empty
+            }
+            None => false,
+        }
+    };
+    if last {
+        let h = host.to_string();
+        std::thread::spawn(move || close_master(&h));
+    }
+}
+
+pub fn release_window(window: &str) {
+    let hosts: Vec<String> = host_users().lock().unwrap().iter().filter(|(_, s)| s.contains(window)).map(|(h, _)| h.clone()).collect();
+    for h in hosts {
+        release(window, &h);
+    }
+}
+
+pub fn users_of(host: &str) -> usize {
+    host_users().lock().unwrap().get(host).map(|s| s.len()).unwrap_or(0)
+}
+
 /// Close every master connection we opened. Called on app exit.
 pub fn close_all() {
     let hosts: Vec<String> = used_hosts().lock().unwrap().iter().cloned().collect();

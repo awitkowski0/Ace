@@ -6,7 +6,7 @@ import { focusedToolWindowId, hideToolWindow, layoutStore } from "../lib/layout"
 import { toggleGroup } from "../components/shell/toolGroups";
 import { listToolWindows, subscribeToolWindows } from "../toolwindows/registry";
 import { isPopupOpen, openPopup } from "../components/shell/popups";
-import { pickAndOpenFolder } from "../lib/project";
+import "./projectActions";
 
 const cap = (s: string) => s.replace(/(^|[-_ ])(\w)/g, (_, __, c: string) => c.toUpperCase());
 
@@ -24,7 +24,6 @@ popup("GotoAction", "Find Action…", ["meta shift A"]);
 popup("RecentFiles", "Recent Files", ["meta E"]);
 popup("Switcher", "Switcher", ["control TAB"]);
 
-registerAction({ id: "OpenFolder", title: "Open Folder…", run: pickAndOpenFolder });
 
 // Esc in a tool window returns focus to editor; ⇧Esc hides the active tool window.
 // Not in the terminal: there Esc belongs to the shell / TUI (vim, claude); ⇧Esc still hides the window.

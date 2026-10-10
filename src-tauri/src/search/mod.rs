@@ -9,10 +9,10 @@ mod bench;
 use crate::Location;
 use index::{FileResult, Index};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use tauri::{AppHandle, Emitter, Listener};
+use tauri::{AppHandle, WebviewWindow};
 use text::{Batch, CancelMap, ReplaceResult, TextOpts};
 
 fn cancels() -> &'static CancelMap {
@@ -20,23 +20,56 @@ fn cancels() -> &'static CancelMap {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Keep local indexes fresh from the fs watcher (`fs://changed`). Installed once.
-fn install_listener(app: &AppHandle) {
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        app.listen("fs://changed", |ev| {
-            #[derive(serde::Deserialize)]
-            struct Ch {
-                root: String,
-                paths: Vec<String>,
-            }
-            let Ok(c) = serde_json::from_str::<Ch>(ev.payload()) else { return };
-            let Some(ix) = index::existing_for_root(&c.root) else { return };
-            for p in &c.paths {
-                ix.apply_change(p);
-            }
-        });
-    });
+/// Local indexes are shared by every window showing the root; the fs watcher feeds them directly.
+pub fn notify_changed(root: &str, paths: &[String]) {
+    if let Some(ix) = index::existing_for_root(root) {
+        for p in paths {
+            ix.apply_change(p);
+        }
+    }
+}
+
+/// Windows (by label) that use each index; an index nobody uses any more is dropped.
+fn users() -> &'static Mutex<HashMap<String, BTreeSet<String>>> {
+    static U: OnceLock<Mutex<HashMap<String, BTreeSet<String>>>> = OnceLock::new();
+    U.get_or_init(Default::default)
+}
+fn track(window: &str, root: &Location) {
+    users().lock().unwrap().entry(index::key(root)).or_default().insert(window.to_string());
+}
+/// A window stopped showing `root`.
+pub fn release_root(window: &str, root: &Location) {
+    let k = index::key(root);
+    let mut u = users().lock().unwrap();
+    if let Some(set) = u.get_mut(&k) {
+        set.remove(window);
+        if set.is_empty() {
+            u.remove(&k);
+            index::drop_index(root);
+        }
+    }
+}
+/// A window closed: leave all indexes it used and cancel the searches it started.
+pub fn release_window(window: &str) {
+    let ids: Vec<u64> = owners().lock().unwrap().iter().filter(|(_, w)| *w == window).map(|(i, _)| *i).collect();
+    for id in ids {
+        search_cancel(id as f64);
+    }
+    let mut u = users().lock().unwrap();
+    let mut dead = vec![];
+    for (k, set) in u.iter_mut() {
+        if set.remove(window) && set.is_empty() {
+            dead.push(k.clone());
+        }
+    }
+    for k in dead {
+        u.remove(&k);
+        index::drop_key(&k);
+    }
+}
+fn owners() -> &'static Mutex<HashMap<u64, String>> {
+    static O: OnceLock<Mutex<HashMap<u64, String>>> = OnceLock::new();
+    O.get_or_init(Default::default)
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = Result<T, String>> {
@@ -52,8 +85,8 @@ pub struct IndexInfo {
 
 /// Build (or fetch) the file index for a project root. Cheap when already built.
 #[tauri::command]
-pub async fn search_index(app: AppHandle, root: Location, rebuild: Option<bool>) -> Result<IndexInfo, String> {
-    install_listener(&app);
+pub async fn search_index(window: WebviewWindow, root: Location, rebuild: Option<bool>) -> Result<IndexInfo, String> {
+    track(window.label(), &root);
     blocking(move || {
         let t = std::time::Instant::now();
         if rebuild.unwrap_or(false) {
@@ -67,8 +100,8 @@ pub async fn search_index(app: AppHandle, root: Location, rebuild: Option<bool>)
 
 /// Fuzzy file search. `recent` = absolute paths of recently opened files (most recent first).
 #[tauri::command]
-pub async fn search_files(app: AppHandle, root: Location, query: String, limit: Option<usize>, recent: Option<Vec<String>>) -> Result<FileResult, String> {
-    install_listener(&app);
+pub async fn search_files(window: WebviewWindow, root: Location, query: String, limit: Option<usize>, recent: Option<Vec<String>>) -> Result<FileResult, String> {
+    track(window.label(), &root);
     blocking(move || {
         let ix = index::get(&root)?;
         Ok::<_, String>(index::query_files(&ix, &query, limit.unwrap_or(60), &recent.unwrap_or_default()))
@@ -85,8 +118,8 @@ pub struct SymbolResult {
 
 /// kind: "all" | "classes"
 #[tauri::command]
-pub async fn search_symbols(app: AppHandle, root: Location, query: String, kind: Option<String>, limit: Option<usize>) -> Result<SymbolResult, String> {
-    install_listener(&app);
+pub async fn search_symbols(window: WebviewWindow, root: Location, query: String, kind: Option<String>, limit: Option<usize>) -> Result<SymbolResult, String> {
+    track(window.label(), &root);
     blocking(move || {
         let ix: Arc<Index> = index::get(&root)?;
         let (hits, elapsed_ms) = symbols::query(&ix, &query, kind.as_deref() == Some("classes"), limit.unwrap_or(60))?;
@@ -98,14 +131,16 @@ pub async fn search_symbols(app: AppHandle, root: Location, query: String, kind:
 /// Start a streamed text search. Results arrive on `search://results/<id>` as `Batch` payloads;
 /// the last one has `done: true`. Cancel with `search_cancel(id)`.
 #[tauri::command]
-pub fn search_text(app: AppHandle, id: f64, root: Location, opts: TextOpts) {
+pub fn search_text(app: AppHandle, window: WebviewWindow, id: f64, root: Location, opts: TextOpts) {
+    let label = window.label().to_string();
+    owners().lock().unwrap().insert(id as u64, label.clone());
     let cancel = Arc::new(AtomicBool::new(false));
     let slot = Arc::new(Mutex::new(None));
     cancels().lock().unwrap().insert(id as u64, (cancel.clone(), slot.clone()));
     tauri::async_runtime::spawn_blocking(move || {
         let ev = format!("search://results/{}", id as u64);
         let emit = |b: Batch| {
-            let _ = app.emit(&ev, b);
+            crate::windows::emit_window(&app, &label, &ev, b);
         };
         if root.is_local() {
             text::search_local(&root.path, &opts, id, &cancel, &emit);
@@ -113,6 +148,7 @@ pub fn search_text(app: AppHandle, id: f64, root: Location, opts: TextOpts) {
             text::search_remote(&root, &opts, id, &cancel, &slot, &emit);
         }
         cancels().lock().unwrap().remove(&(id as u64));
+        owners().lock().unwrap().remove(&(id as u64));
     });
 }
 

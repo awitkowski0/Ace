@@ -5,13 +5,13 @@
 use super::{run, spawn_tracked, ssh};
 use crate::location::Location;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 #[derive(Serialize, Clone)]
 struct Changed {
@@ -20,9 +20,18 @@ struct Changed {
     kind: String,
 }
 
+/// One watch per (host, path), shared by every window that asked for it (reference counted by window label).
 struct Handle {
     stop: Arc<AtomicBool>,
     proc_id: Option<u64>,
+    windows: Arc<Mutex<BTreeSet<String>>>,
+}
+
+type Targets = Arc<Mutex<BTreeSet<String>>>;
+
+fn deliver(app: &AppHandle, targets: &Targets, root: &str, paths: Vec<String>, kind: String) {
+    let labels = targets.lock().unwrap().clone();
+    crate::windows::emit_windows(app, labels.iter(), "fs://changed", Changed { root: root.to_string(), paths, kind });
 }
 
 fn watches() -> &'static Mutex<HashMap<(String, String), Handle>> {
@@ -74,24 +83,27 @@ fn focused(app: &AppHandle) -> bool {
     wins.is_empty() || wins.values().any(|w| w.is_focused().unwrap_or(true))
 }
 
-pub fn watch(app: AppHandle, loc: Location) -> Result<(), String> {
-    watch_impl(app, loc, true)
+pub fn watch(app: AppHandle, window: &str, loc: Location) -> Result<(), String> {
+    watch_impl(app, window, loc, true)
 }
 
 /// Watch ONE directory (non-recursive): used by the Remote Files pane for the visible folder.
-pub fn watch_dir(app: AppHandle, loc: Location) -> Result<(), String> {
-    watch_impl(app, loc, false)
+pub fn watch_dir(app: AppHandle, window: &str, loc: Location) -> Result<(), String> {
+    watch_impl(app, window, loc, false)
 }
 
-pub fn unwatch_dir(loc: &Location) {
-    unwatch_key(&(format!("{}\u{0}dir", loc.host), loc.path.clone()));
+pub fn unwatch_dir(window: &str, loc: &Location) {
+    unwatch_key(window, &(format!("{}\u{0}dir", loc.host), loc.path.clone()));
 }
 
-fn watch_impl(app: AppHandle, loc: Location, recursive: bool) -> Result<(), String> {
+fn watch_impl(app: AppHandle, window: &str, loc: Location, recursive: bool) -> Result<(), String> {
     let key = if recursive { (loc.host.clone(), loc.path.clone()) } else { (format!("{}\u{0}dir", loc.host), loc.path.clone()) };
-    if watches().lock().unwrap().contains_key(&key) {
+    super::ssh::acquire(window, &loc.host);
+    if let Some(h) = watches().lock().unwrap().get(&key) {
+        h.windows.lock().unwrap().insert(window.to_string());
         return Ok(());
     }
+    let targets: Targets = Arc::new(Mutex::new(BTreeSet::from([window.to_string()])));
     let stop = Arc::new(AtomicBool::new(false));
     let host = loc.host.clone();
     let root = loc.path.clone();
@@ -107,7 +119,7 @@ fn watch_impl(app: AppHandle, loc: Location, recursive: bool) -> Result<(), Stri
         let (mut child, id) = spawn_tracked(cmd, "ssh", &format!("inotifywait {host}:{root}"))?;
         proc_id = Some(id);
         let out = child.stdout.take().unwrap();
-        let (stop2, host2, root2) = (stop.clone(), host.clone(), root.clone());
+        let (stop2, host2, root2, targets2) = (stop.clone(), host.clone(), root.clone(), targets.clone());
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
             std::thread::spawn(move || {
@@ -138,7 +150,7 @@ fn watch_impl(app: AppHandle, loc: Location, recursive: bool) -> Result<(), Stri
                             for p in &paths {
                                 super::ops::invalidate(&host2, p);
                             }
-                            let _ = app.emit("fs://changed", Changed { root: root2.clone(), paths, kind: k });
+                            deliver(&app, &targets2, &root2, paths, k);
                         }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -151,29 +163,47 @@ fn watch_impl(app: AppHandle, loc: Location, recursive: bool) -> Result<(), Stri
             let _ = child.wait();
         });
     } else {
-        let (stop2, host2, root2) = (stop.clone(), host.clone(), root.clone());
-        std::thread::spawn(move || poll_loop(app, stop2, host2, root2, recursive));
+        let (stop2, host2, root2, targets2) = (stop.clone(), host.clone(), root.clone(), targets.clone());
+        std::thread::spawn(move || poll_loop(app, targets2, stop2, host2, root2, recursive));
     }
-    watches().lock().unwrap().insert(key, Handle { stop, proc_id });
+    watches().lock().unwrap().insert(key, Handle { stop, proc_id, windows: targets });
     Ok(())
 }
 
-pub fn unwatch(loc: &Location) {
-    unwatch_key(&(loc.host.clone(), loc.path.clone()));
+pub fn unwatch(window: &str, loc: &Location) {
+    unwatch_key(window, &(loc.host.clone(), loc.path.clone()));
+    super::ssh::release(window, &loc.host);
 }
 
-fn unwatch_key(key: &(String, String)) {
-    if let Some(h) = watches().lock().unwrap().remove(key) {
-        h.stop.store(true, Ordering::Relaxed);
-        if let Some(id) = h.proc_id {
-            crate::procs::kill(id);
+fn unwatch_key(window: &str, key: &(String, String)) {
+    let mut w = watches().lock().unwrap();
+    let Some(h) = w.get(key) else { return };
+    let empty = {
+        let mut set = h.windows.lock().unwrap();
+        set.remove(window);
+        set.is_empty()
+    };
+    if empty {
+        if let Some(h) = w.remove(key) {
+            h.stop.store(true, Ordering::Relaxed);
+            if let Some(id) = h.proc_id {
+                crate::procs::kill(id);
+            }
         }
+    }
+}
+
+/// A window closed: leave every watch; watches nobody else holds are stopped (inotifywait killed).
+pub fn release_window(window: &str) {
+    let keys: Vec<(String, String)> = watches().lock().unwrap().iter().filter(|(_, h)| h.windows.lock().unwrap().contains(window)).map(|(k, _)| k.clone()).collect();
+    for k in keys {
+        unwatch_key(window, &k);
     }
 }
 
 type Snap = HashMap<String, HashMap<String, (u64, String)>>; // dir -> path -> (size, mtime)
 
-fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String, recursive: bool) {
+fn poll_loop(app: AppHandle, targets: Targets, stop: Arc<AtomicBool>, host: String, root: String, recursive: bool) {
     let mut prev: Snap = HashMap::new();
     let mut quiet = 0u32;
     loop {
@@ -240,18 +270,19 @@ fn poll_loop(app: AppHandle, stop: Arc<AtomicBool>, host: String, root: String, 
             for p in &paths {
                 super::ops::invalidate(&host, p);
             }
-            let _ = app.emit("fs://changed", Changed { root: root.clone(), paths, kind: kind.into() });
+            deliver(&app, &targets, &root, paths, kind.to_string());
         }
         quiet = if any { 0 } else { quiet + 1 };
     }
 }
 
 #[tauri::command]
-pub async fn remote_watch_dir(app: AppHandle, loc: Location) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || watch_dir(app, loc)).await.map_err(|e| e.to_string())?
+pub async fn remote_watch_dir(app: AppHandle, window: WebviewWindow, loc: Location) -> Result<(), String> {
+    let label = window.label().to_string();
+    tauri::async_runtime::spawn_blocking(move || watch_dir(app, &label, loc)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn remote_unwatch_dir(loc: Location) {
-    unwatch_dir(&loc);
+pub fn remote_unwatch_dir(window: WebviewWindow, loc: Location) {
+    unwatch_dir(window.label(), &loc);
 }

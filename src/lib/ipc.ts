@@ -3,10 +3,20 @@
  * add your own typed wrappers in YOUR module's file (not here) to avoid conflicts.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { EventCallback, UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-export { invoke, listen };
+export { invoke };
 export type { UnlistenFn };
+
+/**
+ * Event subscription scoped to THIS window. Tauri's global `listen` registers with target `Any`, which receives every
+ * event, even ones Rust sent with `emit_to(<other window>)`. Window-scoped listeners only get events addressed to this
+ * window (or broadcast), which is what keeps two project windows from seeing each other's terminal / fs / lsp events.
+ */
+export function listen<T>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+  return getCurrentWebviewWindow().listen<T>(event, handler);
+}
 
 export interface Location {
   host: string; // "local" | ssh alias

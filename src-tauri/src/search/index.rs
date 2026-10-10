@@ -171,6 +171,10 @@ pub fn existing_for_root(root: &str) -> Option<Arc<Index>> {
     c.get().and_then(|r| r.as_ref().ok().cloned())
 }
 
+pub fn drop_key(k: &str) {
+    registry().lock().unwrap().remove(k);
+}
+
 pub fn drop_index(loc: &Location) {
     registry().lock().unwrap().remove(&key(loc));
 }

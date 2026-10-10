@@ -9,13 +9,15 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 const PARALLEL: usize = 2;
 
 #[derive(Clone)]
 struct Job {
     id: String,
+    /// label of the window that started the transfer: it alone receives the progress events
+    owner: String,
     host: String,
     upload: bool,
     src: String,
@@ -44,6 +46,7 @@ struct Queue {
     running: usize,
     all: HashMap<String, Arc<AtomicBool>>,
     procs: HashMap<String, Vec<u64>>,
+    owners: HashMap<String, String>,
 }
 fn q() -> &'static Mutex<Queue> {
     static Q: OnceLock<Mutex<Queue>> = OnceLock::new();
@@ -79,13 +82,15 @@ fn tar_subst(from: &str, to: &str) -> Option<String> {
 }
 
 fn emit(app: &AppHandle, j: &Job, bytes: u64, total: u64, state: &'static str, error: Option<String>) {
-    let _ = app.emit(
+    crate::windows::emit_window(
+        app,
+        &j.owner,
         "remote://transfer",
         Progress { id: j.id.clone(), name: name_of(&j.src), direction: if j.upload { "upload" } else { "download" }, host: j.host.clone(), bytes, total, state, error },
     );
 }
 
-fn enqueue(app: &AppHandle, host: &str, upload: bool, srcs: Vec<String>, dest_dir: &str, dest_names: Option<Vec<String>>) -> Vec<String> {
+fn enqueue(app: &AppHandle, owner: &str, host: &str, upload: bool, srcs: Vec<String>, dest_dir: &str, dest_names: Option<Vec<String>>) -> Vec<String> {
     let mut ids = vec![];
     {
         let mut qq = q().lock().unwrap();
@@ -93,9 +98,10 @@ fn enqueue(app: &AppHandle, host: &str, upload: bool, srcs: Vec<String>, dest_di
             let dest_name = dest_names.as_ref().and_then(|n| n.get(i)).filter(|n| !n.is_empty() && !n.contains('/')).cloned().unwrap_or_else(|| name_of(&s));
             let id = format!("t{}", NEXT.fetch_add(1, Ordering::Relaxed));
             let cancel = Arc::new(AtomicBool::new(false));
-            let job = Job { id: id.clone(), host: host.into(), upload, src: s, dest_dir: dest_dir.into(), dest_name, cancel: cancel.clone() };
+            let job = Job { id: id.clone(), owner: owner.to_string(), host: host.into(), upload, src: s, dest_dir: dest_dir.into(), dest_name, cancel: cancel.clone() };
             emit(app, &job, 0, 0, "queued", None);
             qq.all.insert(id.clone(), cancel);
+            qq.owners.insert(id.clone(), owner.to_string());
             qq.pending.push_back(job);
             ids.push(id);
         }
@@ -134,6 +140,7 @@ fn pump(app: &AppHandle) {
                 qq.running -= 1;
                 qq.all.remove(&job.id);
                 qq.procs.remove(&job.id);
+                qq.owners.remove(&job.id);
             }
             if job.upload {
                 ops::invalidate(&job.host, &format!("{}/x", job.dest_dir));
@@ -355,14 +362,14 @@ fn download(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
 
 /// Upload local files/dirs into `remote_dir` on `host`. Returns transfer ids.
 #[tauri::command]
-pub fn remote_upload(app: AppHandle, host: String, local_paths: Vec<String>, remote_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
-    enqueue(&app, &host, true, local_paths, &remote_dir, dest_names)
+pub fn remote_upload(app: AppHandle, window: tauri::WebviewWindow, host: String, local_paths: Vec<String>, remote_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
+    enqueue(&app, window.label(), &host, true, local_paths, &remote_dir, dest_names)
 }
 
 /// Download remote files/dirs into `local_dir`. Returns transfer ids.
 #[tauri::command]
-pub fn remote_download(app: AppHandle, host: String, remote_paths: Vec<String>, local_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
-    enqueue(&app, &host, false, remote_paths, &local_dir, dest_names)
+pub fn remote_download(app: AppHandle, window: tauri::WebviewWindow, host: String, remote_paths: Vec<String>, local_dir: String, dest_names: Option<Vec<String>>) -> Vec<String> {
+    enqueue(&app, window.label(), &host, false, remote_paths, &local_dir, dest_names)
 }
 
 #[tauri::command]
@@ -385,6 +392,36 @@ pub fn remote_cancel(app: AppHandle, id: String) {
     }
     for i in ids {
         crate::procs::kill(i);
+    }
+}
+
+/// A window closed: cancel the transfers it started (queued ones vanish, running ones are stopped and their ssh/tar
+/// children killed). Other windows' transfers are untouched.
+pub fn release_window(label: &str) {
+    let (flags, procs) = {
+        let mut qq = q().lock().unwrap();
+        let ids: Vec<String> = qq.owners.iter().filter(|(_, o)| *o == label).map(|(i, _)| i.clone()).collect();
+        let dropped: Vec<String> = qq.pending.iter().filter(|j| j.owner == label).map(|j| j.id.clone()).collect();
+        qq.pending.retain(|j| j.owner != label);
+        for d in &dropped {
+            qq.all.remove(d);
+            qq.owners.remove(d);
+        }
+        let mut flags = vec![];
+        let mut procs = vec![];
+        for id in &ids {
+            if let Some(f) = qq.all.get(id) {
+                flags.push(f.clone());
+            }
+            procs.extend(qq.procs.get(id).cloned().unwrap_or_default());
+        }
+        (flags, procs)
+    };
+    for f in flags {
+        f.store(true, Ordering::Relaxed);
+    }
+    for p in procs {
+        crate::procs::kill(p);
     }
 }
 

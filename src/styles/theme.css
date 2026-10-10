@@ -164,3 +164,12 @@ button.primary, .dialog-buttons button.primary { background: var(--accent-bg); c
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(76,86,106,.5); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(76,86,106,.9); background-clip: padding-box; border: 2px solid transparent; }
+.dialog-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
+.dialog-msg { white-space: pre-wrap; word-break: break-all; }
+.rp-list { max-height: 360px; overflow: auto; padding: 0 6px 6px; }
+.rp-row { gap: 6px; }
+.rp-check { width: 14px; color: var(--accent-bg); text-align: center; flex: none; }
+.rp-branch { color: var(--fg-dim); font-size: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-actions { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); }
+.rp-actions button { height: 26px; padding: 0 12px; border-radius: 6px; background: var(--bg-hover); }
+.toolbar { margin-bottom: var(--tabbar-h, 0px); }

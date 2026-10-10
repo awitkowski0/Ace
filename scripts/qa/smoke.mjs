@@ -55,6 +55,14 @@ await check("Escape returns focus to editor", async () => { await key("meta 1");
 await check("typing marks tab dirty", async () => { await app.ev("await __qa.type('zz'); await __qa.sleep(200); return 1"); const s = await S(); return { ok: s.dirty.length === 1, note: `dirty=${s.dirty.length}` }; });
 await check("meta S saves (clears dirty, writes file)", async () => { await app.ev("await __qa.type('zz'); await __qa.sleep(100); return 1"); await key("meta S"); await sleep(500); const s = await S(); const txt = fs.readFileSync(path.join(proj, "scripts/player.gd"), "utf8"); return { ok: s.dirty.length === 0 && txt.includes("zz"), note: `dirty=${s.dirty.length} onDisk=${txt.includes("zz")}` }; });
 await check("meta W closes tab", async () => { await app.ev(`await __qa.openFile(${P("src/util.ts")}); await __qa.sleep(200); __qa.editor()?.focus(); return 1`); const a = await S(); await key("meta W"); await sleep(300); const b = await S(); return { ok: nTabs(b) === nTabs(a) - 1, note: `${nTabs(a)} -> ${nTabs(b)}` }; });
+await check("re-clicking a stripe button closes its tool window (Terminal, editor focused in between)", async () => {
+  const click = () => app.ev(`[...document.querySelectorAll('.stripe-btn')].find((b) => b.title.startsWith('Terminal')).click(); await __qa.sleep(700); return 1`);
+  await click(); const a = await S();
+  await app.ev("__qa.editor()?.focus(); await __qa.sleep(150); return 1");
+  await click(); const b = await S();
+  await click(); const c = await S(); await click(); const d = await S();
+  return { ok: a.toolWindows.bottom === "terminal" && !b.toolWindows.bottom && c.toolWindows.bottom === "terminal" && !d.toolWindows.bottom, note: `open=${a.toolWindows.bottom} afterReclick=${b.toolWindows.bottom} reopen=${c.toolWindows.bottom} reclickFocused=${d.toolWindows.bottom}` };
+});
 } catch (e) { console.error("smoke aborted:", e.message); }
 
 console.log("\n| # | Check | Result | Note |\n|---|---|---|---|");
@@ -62,6 +70,6 @@ rows.forEach((r, i) => console.log(`| ${i + 1} | ${r.name} | ${r.ok ? "PASS" : "
 const failed = rows.filter((r) => !r.ok).length;
 console.log(`\n${rows.length - failed}/${rows.length} passed; screenshots in scripts/qa/out/`);
 await app.stop();
-try { execSync(`pkill -f ${JSON.stringify("--path " + proj)} || true`); } catch {}
+try { execSync(`pkill -f -- ${JSON.stringify("--path " + proj)} || true`); } catch {}
 if (!process.argv.includes("--keep")) fs.rmSync(scratch, { recursive: true, force: true });
 process.exit(failed ? 1 : 0);

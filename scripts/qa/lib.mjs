@@ -10,11 +10,18 @@ export const repo = path.resolve(here, "../..");
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const BIN = process.env.ATELIER_BIN || path.join(repo, "src-tauri/target/release/atelier");
 
-/** Launch Atelier with automation on `project`; resolves once window.__qa answers. Returns {child, sock, t0, ready, ev, shot, stop}. */
-export async function launch(project, { sock = path.join(process.env.TMPDIR || "/tmp", `atelier-qa-${process.pid}.sock`), env = {} } = {}) {
+/** Launch Atelier with automation on `project` (a path, or null/undefined for a launch without arguments, which restores the
+ * previous session); resolves once window.__qa answers. Every launch gets its own ATELIER_DATA_DIR (session.json) and, via
+ * the automation socket, its own single-instance identity, so harness runs never touch Alex's real session or a running Atelier.
+ * Returns {child, sock, dataDir, env, t0, ready, ev, evIn, windows, shot, stop}.
+ * `ev(body, {window})` runs in the given project window (default: the active one); `evIn(label, body)` is the same. */
+export async function launch(project, { sock = path.join(process.env.TMPDIR || "/tmp", `atelier-qa-${process.pid}.sock`), env = {}, dataDir: givenDir } = {}) {
+  const ownDataDir = !givenDir;
+  const dataDir = givenDir || fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "atelier-qa-data-"));
   try { fs.unlinkSync(sock); } catch {}
   const t0 = Date.now();
-  const child = spawn(BIN, [project], { env: { ...process.env, ATELIER_AUTOMATION: "1", ATELIER_AUTOMATION_SOCK: sock, ...env }, stdio: ["ignore", "ignore", "pipe"] });
+  const fullEnv = { ...process.env, ATELIER_AUTOMATION: "1", ATELIER_AUTOMATION_SOCK: sock, ATELIER_DATA_DIR: dataDir, ...env };
+  const child = spawn(BIN, project ? [project] : [], { env: fullEnv, stdio: ["ignore", "ignore", "pipe"] });
   let err = ""; child.stderr.on("data", (d) => { err += d; if (process.env.ATELIER_AUTOMATION_TRACE) process.stderr.write(d); });
   const ev = async (body, o) => {
     const t = Date.now();
@@ -35,7 +42,9 @@ export async function launch(project, { sock = path.join(process.env.TMPDIR || "
     await sleep(20);
   }
   const ready = Date.now();
+  const evIn = (window, body, o) => ev(body, { ...o, window });
+  const windows = () => ev("return await __qa.windows()");
   const shot = (name) => { try { return execFileSync(path.join(here, "shot.sh"), [name], { env: { ...process.env, ATELIER_AUTOMATION_SOCK: sock }, encoding: "utf8" }).trim(); } catch (e) { return "shot failed: " + e.message.split("\n")[0]; } };
-  const stop = async () => { child.kill("SIGTERM"); await new Promise((r) => { child.once("exit", r); setTimeout(r, 6000); }); };
-  return { child, sock, t0, ready, ev, shot, stop, pid: child.pid };
+  const stop = async () => { child.kill("SIGTERM"); await new Promise((r) => { child.once("exit", r); setTimeout(r, 6000); }); if (!ownDataDir) return; try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch {} };
+  return { child, sock, dataDir, env: fullEnv, t0, ready, ev, evIn, windows, shot, stop, pid: child.pid };
 }

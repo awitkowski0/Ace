@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PopupShell, type PopupProps } from "../shell/popups";
-import { FileIcon } from "../shell/icons";
+import { FileIcon, FolderIcon } from "../shell/icons";
 import { editorStore } from "../../editor/store";
 import { useStore } from "../../lib/store";
 import { listToolWindows } from "../../toolwindows/registry";
@@ -10,6 +10,7 @@ import { formatKeystroke } from "../../actions/keystroke";
 import { fuzzy } from "./fuzzy";
 import { currentRoot, openAt } from "./nav";
 import { Hl, dirOf } from "./ui";
+import { windows, type WinItem } from "../../lib/windows";
 
 /** Recent Files (⌘E) and Switcher (⌃⇥, release ⌃ to select). Tool windows on the left, files on the right. */
 export function makeRecent(switcher: boolean) {
@@ -20,6 +21,8 @@ export function makeRecent(switcher: boolean) {
     const [q, setQ] = useState("");
     const [col, setCol] = useState<"files" | "tw">("files");
     const [fsel, setFsel] = useState(0);
+    const [wins, setWins] = useState<WinItem[]>([]);
+    useEffect(() => { if (switcher) windows.list().then(setWins).catch(() => {}); }, []); // eslint-disable-line
     const [tsel, setTsel] = useState(0);
     const box = useRef<HTMLDivElement>(null);
 
@@ -31,6 +34,9 @@ export function makeRecent(switcher: boolean) {
       return q ? all.filter((x) => x.f).sort((a, b) => b.f!.score - a.f!.score) : all;
     }, [recent, docs, q, root]);
     const twList = useMemo(() => (q ? tws.filter((t) => fuzzy(q, t.title)) : tws), [tws, q]);
+    // Switcher only: the open project windows (native tabs) get their own section under Tool Windows.
+    const pjList = useMemo(() => wins.filter((w) => w.project && (!q || fuzzy(q, w.title))), [wins, q]);
+    const tCount = twList.length + pjList.length;
 
     useEffect(() => { box.current?.focus(); setFsel(Math.min(1, Math.max(0, files.length - 1))); }, []); // eslint-disable-line
     useEffect(() => { setFsel((s) => Math.min(s, Math.max(0, files.length - 1))); }, [files.length]);
@@ -42,8 +48,10 @@ export function makeRecent(switcher: boolean) {
         if (x) setTimeout(() => void openAt(x.d.loc), 20);
       } else {
         const t = twList[tsel];
+        const p = t ? undefined : pjList[tsel - twList.length];
         onClose();
         if (t) setTimeout(() => showToolWindow(t.id), 20);
+        else if (p) setTimeout(() => void windows.focus(p.label), 20);
       }
     };
     const chooseRef = useRef(choose);
@@ -51,7 +59,7 @@ export function makeRecent(switcher: boolean) {
 
     const move = (d: number) => {
       if (col === "files") setFsel((s) => (files.length ? (s + d + files.length) % files.length : 0));
-      else setTsel((s) => (twList.length ? (s + d + twList.length) % twList.length : 0));
+      else setTsel((s) => (tCount ? (s + d + tCount) % tCount : 0));
     };
     const moveRef = useRef(move);
     moveRef.current = move;
@@ -100,6 +108,14 @@ export function makeRecent(switcher: boolean) {
                 </div>
               );
             })}
+            {pjList.length > 0 && <div className="popup-section">Open Projects</div>}
+            {pjList.map((w, i) => (
+              <div key={w.label} className={"popup-row se-row" + (col === "tw" && twList.length + i === tsel ? " selected" : "") + (w.current ? " se-active" : "")} data-project-window={w.label}
+                onMouseDown={(e) => { e.preventDefault(); setCol("tw"); setTsel(twList.length + i); }} onClick={choose}>
+                <span className="se-icon"><FolderIcon /></span><span className="se-label">{w.title}</span>
+                {w.current && <span className="se-right">{"\u2713"}</span>}
+              </div>
+            ))}
           </div>
           <div className="se-recent-files">
             <div className="popup-section">Recent Files</div>

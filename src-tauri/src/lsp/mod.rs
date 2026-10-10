@@ -15,11 +15,14 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use std::collections::{BTreeSet, HashSet};
 
 const GODOT_ADDR: &str = "127.0.0.1:6005";
 
 struct Session {
+    owner: String, // window label: receives the messages and stops the session when it closes
+    root: String,
     tx: Sender<Vec<u8>>,
     proc_id: Option<u64>,
     tcp: Option<TcpStream>,
@@ -29,8 +32,8 @@ struct Session {
 pub struct LspState {
     sessions: Mutex<HashMap<String, Session>>,
     next: Mutex<u64>,
-    /// Pre-warmed headless Godot (one per app; replaced when another project warms up).
-    warm: Mutex<Option<Warm>>,
+    /// Headless Godot per project root, shared by the windows on that root (`Warm::users`).
+    warm: Mutex<HashMap<String, Warm>>,
     pause: GodotPause,
 }
 
@@ -40,7 +43,8 @@ pub struct LspState {
 #[derive(Default)]
 struct GodotPause {
     last_ms: AtomicU64,
-    gd_focus: AtomicBool,
+    /// windows whose focused editor is a .gd file
+    gd_focus: Mutex<HashSet<String>>,
     paused: AtomicBool,
     watcher: AtomicBool,
 }
@@ -58,8 +62,8 @@ impl GodotPause {
     }
 }
 
-fn warm_pid(st: &LspState) -> Option<u32> {
-    st.warm.lock().unwrap().as_ref().and_then(|w| w.proc_id).and_then(crate::procs::pid)
+fn warm_pids(st: &LspState) -> Vec<u32> {
+    st.warm.lock().unwrap().values().filter_map(|w| w.proc_id).filter_map(crate::procs::pid).collect()
 }
 
 /// SIGCONT our Godot if it is suspended. Cheap when it is not. Returns true if it had to be resumed.
@@ -69,7 +73,7 @@ fn resume_godot(app: &AppHandle) -> bool {
     if !st.pause.paused.swap(false, Ordering::SeqCst) {
         return false;
     }
-    if let Some(pid) = warm_pid(&st) {
+    for pid in warm_pids(&st) {
         unsafe { libc::killpg(pid as i32, libc::SIGCONT) };
     }
     let _ = app.emit("lsp://godot-paused", false);
@@ -78,22 +82,22 @@ fn resume_godot(app: &AppHandle) -> bool {
 
 fn pause_tick(app: &AppHandle) {
     let st = app.state::<LspState>();
-    let pid = warm_pid(&st);
+    let pids = warm_pids(&st);
     let paused = st.pause.paused.load(Ordering::SeqCst);
-    match pid {
-        None if paused => {
+    if pids.is_empty() {
+        if paused {
             st.pause.paused.store(false, Ordering::SeqCst);
             let _ = app.emit("lsp://godot-paused", false);
         }
-        Some(pid) if !paused => {
-            let idle = now_ms().saturating_sub(st.pause.last_ms.load(Ordering::Relaxed));
-            if idle >= PAUSE_AFTER.as_millis() as u64 && !st.pause.gd_focus.load(Ordering::Relaxed) {
-                st.pause.paused.store(true, Ordering::SeqCst);
+    } else if !paused {
+        let idle = now_ms().saturating_sub(st.pause.last_ms.load(Ordering::Relaxed));
+        if idle >= PAUSE_AFTER.as_millis() as u64 && st.pause.gd_focus.lock().unwrap().is_empty() {
+            st.pause.paused.store(true, Ordering::SeqCst);
+            for pid in pids {
                 unsafe { libc::killpg(pid as i32, libc::SIGSTOP) };
-                let _ = app.emit("lsp://godot-paused", true);
             }
+            let _ = app.emit("lsp://godot-paused", true);
         }
-        _ => {}
     }
 }
 
@@ -112,9 +116,12 @@ fn start_pause_watcher(app: &AppHandle) {
 
 /// Frontend: a .gd editor is (not) the focused editor of a focused window. Focusing resumes immediately.
 #[tauri::command]
-pub fn lsp_godot_focus(app: AppHandle, focused: bool) {
+pub fn lsp_godot_focus(app: AppHandle, window: WebviewWindow, focused: bool) {
     let st = app.state::<LspState>();
-    st.pause.gd_focus.store(focused, Ordering::Relaxed);
+    {
+        let mut g = st.pause.gd_focus.lock().unwrap();
+        if focused { g.insert(window.label().to_string()); } else { g.remove(window.label()); }
+    }
     if focused {
         resume_godot(&app);
     } else {
@@ -123,9 +130,9 @@ pub fn lsp_godot_focus(app: AppHandle, focused: bool) {
 }
 
 struct Warm {
-    root: String,
     port: u16,
     proc_id: Option<u64>, // None while still starting
+    users: BTreeSet<String>, // windows that asked for this root's Godot
 }
 
 const GODOT_BIN: &str = "/Applications/Godot.app/Contents/MacOS/Godot";
@@ -176,55 +183,49 @@ fn spawn_godot(root: &str, low_priority: bool) -> Result<(u16, u64, Option<TcpSt
 
 /// Exactly one headless Godot per project root: Idle -> Starting -> Ready, shared by pre-warm and `lsp_start`.
 /// Concurrent callers for the same root wait for the single start in flight. Returns the LSP port.
-fn ensure_godot(st: &LspState, root: &str) -> Result<u16, String> {
-    ensure_godot_with(st, root, &|r| spawn_godot(r, true))
+fn ensure_godot(st: &LspState, owner: &str, root: &str) -> Result<u16, String> {
+    ensure_godot_with(st, owner, root, &|r| spawn_godot(r, true))
 }
 
 type Spawner<'a> = &'a (dyn Fn(&str) -> Result<(u16, u64, Option<TcpStream>), String> + Sync);
 
-fn ensure_godot_with(st: &LspState, root: &str, spawn: Spawner) -> Result<u16, String> {
+fn ensure_godot_with(st: &LspState, owner: &str, root: &str, spawn: Spawner) -> Result<u16, String> {
     let t0 = std::time::Instant::now();
     loop {
         let mut w = st.warm.lock().unwrap();
-        let mut stale = None;
-        match w.as_ref() {
-            Some(c) if c.root == root => {
-                if c.proc_id.is_some() {
-                    return Ok(c.port);
-                }
-                drop(w); // another caller is starting it: wait
-                if t0.elapsed() > Duration::from_secs(100) {
-                    return Err("godot start timed out".into());
-                }
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
+        if let Some(c) = w.get_mut(root) {
+            c.users.insert(owner.to_string());
+            if c.proc_id.is_some() {
+                return Ok(c.port);
             }
-            Some(other) => stale = other.proc_id,
-            None => {}
+            drop(w); // another caller is starting it: wait
+            if t0.elapsed() > Duration::from_secs(100) {
+                return Err("godot start timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
         }
-        *w = Some(Warm { root: root.to_string(), port: 0, proc_id: None });
+        w.insert(root.to_string(), Warm { port: 0, proc_id: None, users: BTreeSet::from([owner.to_string()]) });
         drop(w);
-        if let Some(p) = stale {
-            crate::procs::kill(p);
-        }
         let res = spawn(root);
         let mut w = st.warm.lock().unwrap();
-        let ours = w.as_ref().map(|c| c.root == root && c.proc_id.is_none()).unwrap_or(false);
+        let ours = w.get(root).map(|c| c.proc_id.is_none()).unwrap_or(false);
         return match res {
             Ok((port, id, _sock)) => {
                 if ours {
-                    *w = Some(Warm { root: root.to_string(), port, proc_id: Some(id) });
+                    let users = w.get(root).map(|c| c.users.clone()).unwrap_or_default();
+                    w.insert(root.to_string(), Warm { port, proc_id: Some(id), users });
                     st.pause.touch();
                     st.pause.paused.store(false, Ordering::SeqCst);
                     Ok(port)
                 } else {
-                    crate::procs::kill(id); // superseded while starting
+                    crate::procs::kill(id); // dropped while starting (all users went away)
                     Err("superseded".into())
                 }
             }
             Err(e) => {
                 if ours {
-                    *w = None;
+                    w.remove(root);
                 }
                 Err(e)
             }
@@ -233,44 +234,40 @@ fn ensure_godot_with(st: &LspState, root: &str, spawn: Spawner) -> Result<u16, S
 }
 
 fn drop_warm(st: &LspState, root: &str) {
-    let mut w = st.warm.lock().unwrap();
-    if w.as_ref().map(|c| c.root == root).unwrap_or(false) {
-        if let Some(p) = w.take().and_then(|c| c.proc_id) {
-            crate::procs::kill(p);
-        }
+    let w = st.warm.lock().unwrap().remove(root);
+    if let Some(p) = w.and_then(|c| c.proc_id) {
+        crate::procs::kill(p);
     }
 }
 
-fn prewarm_blocking(app: AppHandle, root: String) -> Result<(), String> {
+fn prewarm_blocking(app: AppHandle, owner: String, root: String) -> Result<(), String> {
     let st = app.state::<LspState>();
     if connect_tcp(GODOT_ADDR).is_ok() {
         return Ok(()); // an editor already serves 6005: reuse it, nothing to warm
     }
-    let r = ensure_godot(&st, &root).map(|_| ());
+    let r = ensure_godot(&st, &owner, &root).map(|_| ());
     start_pause_watcher(&app);
     r
 }
 
 /// Idle headless Godot costs ~10% CPU and ~1.5 GB (--max-fps / --frame-delay / --fixed-fps measured: no change),
-/// so stop it when no Godot session has existed for 5 minutes.
-fn schedule_godot_reap(app: &AppHandle) {
+/// so stop a root's Godot when no Godot session on that root has existed for 5 minutes.
+fn schedule_godot_reap(app: &AppHandle, root: String) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(300));
         let st = app.state::<LspState>();
-        let busy = st.sessions.lock().unwrap().keys().any(|k| k.starts_with("godot-"));
+        let busy = st.sessions.lock().unwrap().iter().any(|(k, s)| k.starts_with("godot-") && s.root == root);
         if !busy {
-            let root = st.warm.lock().unwrap().as_ref().map(|c| c.root.clone());
-            if let Some(r) = root {
-                drop_warm(&st, &r);
-            }
+            drop_warm(&st, &root);
         }
     });
 }
 
 #[tauri::command]
-pub async fn lsp_prewarm(app: AppHandle, root: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || prewarm_blocking(app, root)).await.map_err(|e| e.to_string())?
+pub async fn lsp_prewarm(app: AppHandle, window: WebviewWindow, root: String) -> Result<(), String> {
+    let owner = window.label().to_string();
+    tauri::async_runtime::spawn_blocking(move || prewarm_blocking(app, owner, root)).await.map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize, Clone)]
@@ -401,9 +398,9 @@ fn finish(app: &AppHandle, id: &str) {
         if let Some(p) = s.proc_id {
             crate::procs::kill(p);
         }
-        let _ = app.emit(&format!("lsp://closed/{id}"), ());
+        crate::windows::emit_window(app, &s.owner, &format!("lsp://closed/{id}"), ());
         if id.starts_with("godot-") {
-            schedule_godot_reap(app);
+            schedule_godot_reap(app, s.root.clone());
         }
     }
 }
@@ -416,7 +413,7 @@ fn connect_tcp(a: &str) -> Result<TcpStream, String> {
     Ok(s)
 }
 
-fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: bool) -> Result<String, String> {
+fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String, auto_godot: bool) -> Result<String, String> {
     let spec = SPECS.iter().find(|s| s.id == server_id).ok_or_else(|| format!("unknown server {server_id}"))?;
     let st = app.state::<LspState>();
     let id = {
@@ -430,13 +427,13 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
             Ok(s) => s,
             Err(e) if !auto_godot => return Err(format!("unreachable: {e}")),
             Err(e) => {
-                if !auto_godot && st.warm.lock().unwrap().as_ref().map(|c| c.root != root).unwrap_or(true) {
+                if !auto_godot && !st.warm.lock().unwrap().contains_key(&root) {
                     return Err(format!("unreachable: {e}"));
                 }
                 let mut tries = 0;
                 loop {
                     resume_godot(&app); // a suspended Godot accepts TCP (kernel backlog) but cannot answer
-                    let port = ensure_godot(&st, &root).map_err(|m| if m.contains("not found") { format!("unreachable: {e}") } else { m })?;
+                    let port = ensure_godot(&st, &owner, &root).map_err(|m| if m.contains("not found") { format!("unreachable: {e}") } else { m })?;
                     match connect_tcp(&format!("127.0.0.1:{port}")) {
                         Ok(s) => break s,
                         Err(_) if tries == 0 => {
@@ -452,13 +449,13 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
         let rd = sock.try_clone().map_err(|e| e.to_string())?;
         let wr = sock.try_clone().map_err(|e| e.to_string())?;
         let tx = spawn_writer(wr);
-        st.sessions.lock().unwrap().insert(id.clone(), Session { tx, proc_id, tcp: Some(sock) });
-        let (a, i) = (app.clone(), id.clone());
+        st.sessions.lock().unwrap().insert(id.clone(), Session { owner: owner.clone(), root: root.clone(), tx, proc_id, tcp: Some(sock) });
+        let (a, i, o) = (app.clone(), id.clone(), owner.clone());
         std::thread::spawn(move || {
             let ev = format!("lsp://msg/{i}");
             read_loop(rd, |m| {
                 a.state::<LspState>().pause.touch(); // incoming traffic (diagnostics etc.) keeps Godot awake
-                let _ = a.emit(&ev, m);
+                crate::windows::emit_window(&a, &o, &ev, m);
             });
             finish(&a, &i);
         });
@@ -474,21 +471,22 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
-    let proc_id = crate::procs::register("lsp", spec.label, child);
+    let proc_id = crate::procs::register_for(&owner, "lsp", spec.label, child);
     let tx = spawn_writer(stdin);
-    st.sessions.lock().unwrap().insert(id.clone(), Session { tx, proc_id: Some(proc_id), tcp: None });
-    let (a, i) = (app.clone(), id.clone());
+    st.sessions.lock().unwrap().insert(id.clone(), Session { owner: owner.clone(), root: root.clone(), tx, proc_id: Some(proc_id), tcp: None });
+    let (a, i, o) = (app.clone(), id.clone(), owner.clone());
     std::thread::spawn(move || {
         let ev = format!("lsp://msg/{i}");
-        read_loop(stdout, |m| { let _ = a.emit(&ev, m); });
+        read_loop(stdout, |m| crate::windows::emit_window(&a, &o, &ev, m));
         finish(&a, &i);
     });
     Ok(id)
 }
 
 #[tauri::command]
-pub async fn lsp_start(app: AppHandle, server_id: String, root: String, auto_godot: Option<bool>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || start_blocking(app, server_id, root, auto_godot.unwrap_or(false))).await.map_err(|e| e.to_string())?
+pub async fn lsp_start(app: AppHandle, window: WebviewWindow, server_id: String, root: String, auto_godot: Option<bool>) -> Result<String, String> {
+    let owner = window.label().to_string();
+    tauri::async_runtime::spawn_blocking(move || start_blocking(app, owner, server_id, root, auto_godot.unwrap_or(false))).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -511,6 +509,39 @@ pub fn lsp_stop(state: State<'_, LspState>, session_id: String) {
         if let Some(p) = s.proc_id {
             crate::procs::kill(p);
         }
+    }
+}
+
+/// A window closed: stop the LSP sessions it owns and drop its claim on shared headless Godots. A Godot whose last user
+/// went away is killed right away (other windows on the same root keep it alive).
+pub fn release_window(app: &AppHandle, label: &str) {
+    let st = app.state::<LspState>();
+    let mine: Vec<String> = st.sessions.lock().unwrap().iter().filter(|(_, s)| s.owner == label).map(|(k, _)| k.clone()).collect();
+    for id in mine {
+        let s = st.sessions.lock().unwrap().remove(&id);
+        if let Some(s) = s {
+            if let Some(t) = s.tcp {
+                let _ = t.shutdown(std::net::Shutdown::Both);
+            }
+            if let Some(p) = s.proc_id {
+                crate::procs::kill(p);
+            }
+        }
+    }
+    st.pause.gd_focus.lock().unwrap().remove(label);
+    let orphaned: Vec<String> = {
+        let mut w = st.warm.lock().unwrap();
+        let mut dead = vec![];
+        for (root, c) in w.iter_mut() {
+            c.users.remove(label);
+            if c.users.is_empty() {
+                dead.push(root.clone());
+            }
+        }
+        dead
+    };
+    for root in orphaned {
+        drop_warm(&st, &root);
     }
 }
 
@@ -550,14 +581,14 @@ mod tests {
             Ok((4242, 0, None))
         };
         let ports: Vec<u16> = std::thread::scope(|s| {
-            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| ensure_godot_with(&st, "/p", &spawn).unwrap())).collect();
+            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| ensure_godot_with(&st, "w", "/p", &spawn).unwrap())).collect();
             hs.into_iter().map(|h| h.join().unwrap()).collect()
         });
         assert_eq!(spawned.load(Ordering::SeqCst), 1);
         assert!(ports.iter().all(|p| *p == 4242));
         // failure clears the state so a later call can retry
         let st2 = LspState::default();
-        assert!(ensure_godot_with(&st2, "/p", &|_| Err("boom".into())).is_err());
-        assert_eq!(ensure_godot_with(&st2, "/p", &|_| Ok((7, 0, None))).unwrap(), 7);
+        assert!(ensure_godot_with(&st2, "w", "/p", &|_| Err("boom".into())).is_err());
+        assert_eq!(ensure_godot_with(&st2, "w", "/p", &|_| Ok((7, 0, None))).unwrap(), 7);
     }
 }
