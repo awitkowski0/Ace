@@ -9,6 +9,7 @@ import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { registerGdscript } from "./gdscript";
 import { nordTheme } from "./nordTheme";
 import { applyMonacoKeymapPolicy } from "./monacoKeymap";
+import { openExternal } from "../lib/external";
 
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker(_: string, label: string) {
@@ -22,6 +23,8 @@ import { applyMonacoKeymapPolicy } from "./monacoKeymap";
 };
 
 loader.config({ monaco });
+// Hover / document links: http(s) and mailto go to the system browser through tauri-plugin-opener (window.open does nothing in the webview).
+monaco.editor.registerLinkOpener({ open: (uri) => openExternal(uri.toString(true)) });
 registerGdscript(monaco);
 monaco.editor.defineTheme("nord", nordTheme);
 monaco.editor.setTheme("nord");

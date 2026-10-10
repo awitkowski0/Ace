@@ -79,12 +79,34 @@ pub fn start(app: &AppHandle) {
         .ok();
 }
 
+fn trace() -> bool {
+    static T: OnceLock<bool> = OnceLock::new();
+    *T.get_or_init(|| std::env::var_os("ATELIER_AUTOMATION_TRACE").is_some())
+}
+
 fn handle(app: AppHandle, mut conn: UnixStream) {
-    let mut body = String::new();
-    if conn.read_to_string(&mut body).is_err() {
-        return;
+    let t0 = std::time::Instant::now();
+    // A request ends at EOF or at a NUL byte. The NUL matters: Node's `socket.end()` sometimes never delivers the FIN
+    // (measured ~1 in 700 connections), which used to leave `read_to_string` blocked until the client gave up.
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match conn.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if let Some(i) = chunk[..n].iter().position(|b| *b == 0) {
+                    buf.extend_from_slice(&chunk[..i]);
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            Err(_) => return,
+        }
     }
+    let body = String::from_utf8_lossy(&buf).into_owned();
+    if trace() { eprintln!("[automation] req {} bytes read in {:?}", body.len(), t0.elapsed()); }
     let reply = run_js(&app, &body);
+    if trace() { eprintln!("[automation] reply after {:?}: {}", t0.elapsed(), reply.as_ref().map(|v| v.len().to_string()).unwrap_or_else(|e| e.clone())); }
     let line = match reply {
         Ok(v) => format!("{{\"ok\":true,\"value\":{}}}", if v.is_empty() { "null".into() } else { v }),
         Err(e) => json!({"ok": false, "error": e}).to_string(),

@@ -14,7 +14,7 @@ export function evalJs(body, { sock = sockPath(), timeout = 35000 } = {}) {
     const c = net.createConnection(sock);
     let buf = "";
     const timer = setTimeout(() => { c.destroy(); reject(new Error("client timeout")); }, timeout);
-    c.on("connect", () => c.end(body));
+    c.on("connect", () => c.end(body + "\0")); // NUL terminates the request: end() alone sometimes never delivers FIN
     c.on("data", (d) => (buf += d));
     c.on("error", (e) => { clearTimeout(timer); reject(e); });
     c.on("close", () => {

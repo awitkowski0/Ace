@@ -37,8 +37,12 @@ const cpuSec = (p) => { const t = sh(`ps -o time= -p ${p}`); if (!t) return 0; c
 const kids = (pid) => sh(`ps -axo pid=,ppid= | awk '$2==${pid}{print $1}'`).split("\n").filter(Boolean);
 const mb = (kb) => r1(kb / 1024);
 
+// WebKit helpers are XPC services (ppid 1) that cannot be attributed to the app by pid, so ours are the ones that appear
+// between "just before launch" and "1.5 s after the window is ready", then the set is LOCKED: a Safari/Mail/other WebKit
+// app starting a helper later in the run cannot be counted. Helpers already running before launch (wk0) are excluded too.
+let wkLocked = null;
 async function procs(app, wk0) {
-  const wk = [...wkPids()].filter((p) => !wk0.has(p));
+  const wk = wkLocked ?? [...wkPids()].filter((p) => !wk0.has(p));
   const children = kids(app.pid);
   return { app: String(app.pid), webkit: wk, children };
 }
@@ -67,6 +71,8 @@ const wk0 = wkPids();
 const app = await launch(proj);
 await sleep(1500);
 const procsIdle0 = await procs(app, wk0);
+wkLocked = procsIdle0.webkit;
+res.webkitAlreadyRunning = wk0.size; // WebKit helpers of OTHER apps present before launch (noise source if >0)
 res.rssFresh = sizes(procsIdle0);
 
 // 10 tabs
@@ -77,20 +83,35 @@ const big = bySize[bySize.length - 1][0];
 res.openFile = { n: openMs.length, medianMs: r1(median(openMs)), maxMs: r1(Math.max(...openMs)), allMs: openMs.map(r1), note: "Thematic .gd files, smallest..largest by size, first open (read + model + paint)" };
 res.largestFile = { path: big, bytes: bySize[bySize.length - 1][1], ms: r1(await app.ev(`return await __qa.measureOpen(${JSON.stringify(big)})`)) };
 const tabs = await app.ev("return __qa.state().tabs.flatMap(g=>g.tabs).length");
+res.liveModels = await app.ev("return (await __qa.models()).length");
 await sleep(5000);
 const pi = await procs(app, wk0);
 res.childList = pi.children.map((p) => ({ pid: p, rssMB: mb(rssKB([p])), cmd: sh(`ps -o command= -p ${p}`).slice(0, 90) }));
 res.rss10Tabs = { tabs, ...sizes(pi), webkitProcs: pi.webkit.length, childProcs: pi.children.length };
 Object.assign(res.rss10Tabs, { totalMB: sizes(pi).totalMB, totalNoChildrenMB: sizes(pi).totalNoChildrenMB });
 
-// idle CPU 30s
+// idle CPU 30s, twice: (a) a .gd tab focused (LSP session live, headless Godot awake, WebKit animating the focused
+// editor's caret), (b) a non-.gd tab active for 25 s so the backend has SIGSTOPped Godot ("GDScript: paused"), then the
+// editor blurred = what an app left in the background looks like (the harness cannot defocus the OS window).
+// Finding (docs/PERF.md): any focused editable element in WKWebView on macOS 26 costs ~2-7% of a core (WebKit's caret
+// animation follows the display link), independent of Monaco; a blurred page costs ~0.
 const all = [pi.app, ...pi.webkit, ...pi.children];
-const c0 = Object.fromEntries(all.map((p) => [p, cpuSec(p)]));
-const t0 = Date.now();
-await sleep(30000);
-const el = (Date.now() - t0) / 1000;
-const grp = (ps) => ps.reduce((s, p) => s + (cpuSec(p) - (c0[p] ?? 0)), 0);
-res.idleCpu = { seconds: r1(el), appPct: r1((100 * grp([pi.app])) / el), webkitPct: r1((100 * grp(pi.webkit)) / el), childrenPct: r1((100 * grp(pi.children)) / el), appPlusWebkitPct: r1((100 * grp([pi.app, ...pi.webkit])) / el) };
+const grp = (ps, c0, el) => ps.reduce((s, p) => s + (cpuSec(p) - (c0[p] ?? 0)), 0);
+async function idleWindow(seconds) {
+  const c0 = Object.fromEntries(all.map((p) => [p, cpuSec(p)]));
+  const t0 = Date.now();
+  await sleep(seconds * 1000);
+  const el = (Date.now() - t0) / 1000;
+  const g = (ps) => r1((100 * grp(ps, c0)) / el);
+  return { seconds: r1(el), appPct: g([pi.app]), webkitPct: g(pi.webkit), childrenPct: g(pi.children), appPlusWebkitPct: g([pi.app, ...pi.webkit]), godotStat: pi.children.map((p) => sh(`ps -o stat= -p ${p}`)).join(",") };
+}
+res.idleCpu = await idleWindow(30);
+await app.ev(`await __qa.openFile(${JSON.stringify(path.join(proj, "README.md"))}); return 1`);
+await sleep(25000);
+await app.ev("document.activeElement?.blur(); return 1");
+await sleep(3000);
+res.idleCpuPaused = await idleWindow(30);
+await app.ev(`await __qa.openFile(${JSON.stringify(files10[5])}); return 1`);
 
 // keystroke-to-paint
 await app.ev(`await __qa.openFile(${JSON.stringify(files10[5])}); __qa.editor().focus(); await __qa.sleep(300); return 1`);

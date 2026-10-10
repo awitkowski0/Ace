@@ -86,6 +86,7 @@ pub fn run() {
             lsp::lsp_prewarm,
             lsp::lsp_send,
             lsp::lsp_stop,
+            lsp::lsp_godot_focus,
             // == claude ==
             claude::claude_sessions,
             claude::claude_sessions_cached,

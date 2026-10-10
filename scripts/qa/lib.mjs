@@ -15,8 +15,19 @@ export async function launch(project, { sock = path.join(process.env.TMPDIR || "
   try { fs.unlinkSync(sock); } catch {}
   const t0 = Date.now();
   const child = spawn(BIN, [project], { env: { ...process.env, ATELIER_AUTOMATION: "1", ATELIER_AUTOMATION_SOCK: sock, ...env }, stdio: ["ignore", "ignore", "pipe"] });
-  let err = ""; child.stderr.on("data", (d) => (err += d));
-  const ev = (body, o) => evalJs(body, { sock, ...o });
+  let err = ""; child.stderr.on("data", (d) => { err += d; if (process.env.ATELIER_AUTOMATION_TRACE) process.stderr.write(d); });
+  const ev = async (body, o) => {
+    const t = Date.now();
+    try { return await evalJs(body, { sock, ...o }); }
+    catch (e) {
+      // Diagnostics for harness flakes: how long it took, and a stack sample of the (possibly stuck) app.
+      if (process.env.QA_TRACE || /timeout/i.test(String(e.message))) {
+        console.error(`[qa] eval failed after ${Date.now() - t} ms: ${String(e.message).slice(0, 100)} | body: ${body.replace(/\s+/g, " ").slice(0, 100)}`);
+        if (/client timeout/.test(String(e.message)) && process.env.QA_SAMPLE) { try { execFileSync("sample", [String(child.pid), "2", "-file", process.env.QA_SAMPLE], { stdio: "ignore" }); } catch {} }
+      }
+      throw e;
+    }
+  };
   for (let i = 0; ; i++) {
     if (child.exitCode !== null) throw new Error("app exited: " + err);
     if (fs.existsSync(sock)) { try { if (await ev("return !!window.__qa", { timeout: 3000 })) break; } catch {} }

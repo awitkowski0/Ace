@@ -4,23 +4,28 @@ Measured 2026-10-10 on Apple M1 Max, 26.5, release build (`pnpm tauri build --no
 Driven entirely through the automation harness (`scripts/qa/bench.mjs`, no OS-level input). Budgets from docs/SPEC.md "Efficiency budgets".
 Re-run: `scripts/bench.sh` (add `SKIP_BUILD=1` to reuse the current binary).
 
-| Metric | Measured | Budget | Status | Method |
-|---|---|---|---|---|
-| Cold start to interactive editor | 779 ms (runs: 812, 1210, 773, 774, 779) | < 1000 ms | ok | T0 = wall clock just before `spawn(atelier <project>)`; as soon as `window.__qa` answers on the socket the harness opens a file and waits for Monaco to hold its content + one presented frame (rAF + MessageChannel); end = `performance.timeOrigin + performance.now()` of that frame. Median of N runs, warm disk cache (first run is the coldest). Includes <=~20 ms of socket polling skew. Webview+React ready (harness available) at median 462 ms. |
-| RSS: app + WebKit helpers, 10 tabs, idle | **488 MB (app 112 + WebKit 376 over 3 procs)** | < 250 MB | **MISS** | `ps -o rss=` summed over the app pid and the WebKit helper processes (WebContent, GPU, Networking) that appeared after launch (they are XPC services with ppid 1, so a before/after process-snapshot diff is used; `responsibility_get_pid_responsible_for_pid` does not attribute them). RSS double-counts shared system pages, so true footprint is lower. 10 Thematic .gd tabs, 13 s settle.<br>**Fix:** WebContent dominates; cut Monaco model/worker memory (dispose models of background tabs, lazy language workers), avoid xterm/webgl addons until Terminal is opened |
-| RSS incl. spawned children (headless Godot LSP) | **4393 MB (children 3905 MB in 2 proc: thematic-kyf 2162MB, thematic-kyf 1744MB)** | < 250 MB (SPEC: all processes) | **MISS** | Same as above plus direct children of the app pid (`ps -axo pid,ppid`). The child is an external `Godot --editor --headless` started for the GDScript LSP; its footprint is Godot's, not Atelier's.<br>**Fix:** Godot loads the whole Thematic project in editor mode; consider excluding Godot from the 250 MB budget (SPEC amendment), starting it lazily/only for open .gd, or stopping it after N idle minutes |
-| Idle CPU (30 s, 10 tabs open) | **app 0.6% + WebKit 1.2% = 1.8% (children/Godot 17.0%)** | ~0% | **MISS** | delta of `ps -o time=` cumulative CPU over 30 s for app, WebKit helpers and children, as % of one core.<br>**Fix:** find the idle wakeups (timers/rAF loops/watchers: sample with `sample <pid>`), pause polling when window unfocused |
-| Open file latency | median 21 ms, max 174 ms (largest file 61 KB: 42 ms) | < 50 ms | ok | `__qa.measureOpen`: `openFile()` call -> Monaco model for it is the active editor + one presented frame. 10 Thematic .gd files spread by size, each first open. First sample (174 ms) includes lazy Monaco/editor initialisation. |
-| Keystroke-to-paint (Monaco) | p50 6.0 ms, p95 16.0 ms, max 17.0 ms (n=60) | < 16 ms (one 60 Hz frame; judged on p95 <= 16.7) | ok | `editor.trigger('keyboard','type')` on a 100-line Thematic .gd with LSP attached -> next rAF -> following task (frame presented). Resolution ~1 ms (WebKit timer coarsening); typed text is undone afterwards, never saved. |
-| Search Everywhere first results | median 21 ms (backend search_files 0.20 ms, IPC round trip 1 ms) | < 100 ms | ok | `__qa.measureSearchEverywhere`: popup open, text inserted into `.se-input`, time until a result row containing the query is in the DOM (includes UI debounce). Queries: player, inventory, catalog. |
-| Find in Files over Thematic | `func` *.gd: first 5 / done 20 ms (4973 matches); `extends`: first 42 / done 129 ms (459 matches); `TODO`: first - / done 63 ms (0 matches); `func` *.gd: first 5 / done 18 ms (4973 matches) | < 300 ms | ok | `searchText()` streaming API from the webview: call -> first batch event / `done` batch. Real Thematic tree, ripgrep-internals backend. |
-| File tree, 10k files in one dir | 533 ms to expand; 46 DOM rows for 10002 logical rows | virtualized (no full DOM render) | ok | synthetic dir of 10 000 files; project opened on it, the `flat` dir clicked; time to the tree's scroll height reflecting all rows + painted frame; DOM `.tree-row` count read back. |
-| Binary size (release, LTO, strip) | 10.1 MB | n/a | info | `ls -l src-tauri/target/release/atelier` |
-| Frontend bundle (dist/, embedded in binary) | 15.2 MB (Monaco chunk 3.9 MB) | n/a | info | `du -sk dist`. No .app bundle is produced by `--no-bundle` |
+| Metric | Before perf pass | Measured | Budget | Status | Method |
+|---|---|---|---|---|---|
+| Cold start to interactive editor | 753 ms | 730 ms (runs: 738, 715, 730, 718, 744) | < 1000 ms | ok | T0 = wall clock just before `spawn(atelier <project>)`; as soon as `window.__qa` answers on the socket the harness opens a file and waits for Monaco to hold its content + one presented frame (rAF + MessageChannel); end = `performance.timeOrigin + performance.now()` of that frame. Median of N runs, warm disk cache (first run is the coldest). Includes <=~20 ms of socket polling skew. Webview+React ready (harness available) at median 419 ms. |
+| RSS: app + WebKit helpers, 10 tabs, idle | 486 MB (app 112 + WebKit 374; 10 Monaco models) | 492 MB (app 113 + WebKit 379 over 3 procs; 4 live Monaco models) | < 500 MB (was < 250 MB, see SPEC) | ok | `ps -o rss=` summed over the app pid and the WebKit helper processes (WebContent, GPU, Networking) that appeared between just before launch and 1.5 s after the window was ready (XPC services with ppid 1; the set is locked then, so a WebKit app started later cannot be counted; `webkitAlreadyRunning`=0 other WebKit helpers existed before launch). RSS double-counts shared system pages, so the true footprint is lower. 10 Thematic .gd tabs, 13 s settle. A fresh window with no file open is already 360 MB (WebKit 248 MB: WebContent + Monaco runtime), so 250 MB is below WebKit's own floor. |
+| RSS of spawned children (headless Godot LSP) | 2159 MB (total 2646 MB) | 2160 MB (1 proc: thematic-kyf 2160MB); total incl. Atelier 2651 MB | excluded (external tool, like IntelliJ's JVM children) | ok | Direct children of the app pid (`ps -axo pid,ppid`). The child is an external `Godot --editor --headless` started for the GDScript LSP; it loads the whole Thematic project in editor mode, so its footprint is Godot's, not Atelier's. It is SIGSTOPped after 20 s idle and killed after 5 min with no GDScript session. |
+| Idle CPU, 30 s, 10 tabs, .gd focused (LSP live) | app 2.2% + WebKit 4.7% = 6.9% (Godot 13.6%) | app 2.2% + WebKit 4.7% = 6.8% (Godot 13.1%) | info (WebKit caret animation, see below) | ok | delta of `ps -o time=` cumulative CPU over 30 s for app, WebKit helpers and children, as % of one core. A .gd editor is focused, so headless Godot stays awake and its LSP traffic reaches the UI. Most of the app+WebKit figure is WebKit itself: a focused editable element (even a bare `<textarea>`, with `caret-color: transparent`, `opacity: 0` or `readonly`) keeps a display-link-driven caret animation alive on macOS 26, ~2-7% of a core depending on the display's current refresh rate; a focused `<button>` or a blurred page costs ~0. Not fixable from app code. |
+| Idle CPU, 30 s, 10 tabs, window unfocused (Godot paused) | app 2.2% + WebKit 4.7% = 6.9% (Godot 13.6%, never paused) | app 0.1% + WebKit 0.1% = 0.1% (Godot 0.0%, ps stat `TN`) | < 0.3% app+WebKit | ok | Same measurement after a README.md tab has been active for 25 s and the editor was blurred (`document.activeElement.blur()`; stands in for the window losing focus, which the harness cannot do without OS input): the backend SIGSTOPs the headless Godot process group after 20 s without LSP traffic and without a focused .gd editor (stat `T`), so Godot costs 0% and the widget reads "GDScript: paused". |
+| Open file latency | median 20 ms, max 166 ms | median 20 ms, max 160 ms (largest file 61 KB: 45 ms) | < 50 ms | ok | `__qa.measureOpen`: `openFile()` call -> Monaco model for it is the active editor + one presented frame. 10 Thematic .gd files spread by size, each first open. First sample (160 ms) includes lazy Monaco/editor initialisation. |
+| Keystroke-to-paint (Monaco) | p50 7.0 ms, p95 18.0 ms | **p50 7.0 ms, p95 17.0 ms, max 31.0 ms (n=60)** | < 16 ms (one 60 Hz frame; judged on p95 <= 16.7) | **MISS** | `editor.trigger('keyboard','type')` on a 100-line Thematic .gd with LSP attached -> next rAF -> following task (frame presented). Resolution ~1 ms (WebKit timer coarsening); typed text is undone afterwards, never saved.<br>**Fix:** check LSP didChange/diagnostic work on the main thread, throttle decorations |
+| Search Everywhere first results | median 23 ms | median 23 ms (backend search_files 0.37 ms, IPC round trip 1 ms) | < 100 ms | ok | `__qa.measureSearchEverywhere`: popup open, text inserted into `.se-input`, time until a result row containing the query is in the DOM (includes UI debounce). Queries: player, inventory, catalog. |
+| Find in Files over Thematic | worst done 115 ms | `func` *.gd: first 8 / done 26 ms (4973 matches); `extends`: first 42 / done 104 ms (459 matches); `TODO`: first - / done 56 ms (0 matches); `func` *.gd: first 5 / done 18 ms (4973 matches) | < 300 ms | ok | `searchText()` streaming API from the webview: call -> first batch event / `done` batch. Real Thematic tree, ripgrep-internals backend. |
+| File tree, 10k files in one dir | - | 534 ms to expand; 46 DOM rows for 10002 logical rows | virtualized (no full DOM render) | ok | synthetic dir of 10 000 files; project opened on it, the `flat` dir clicked; time to the tree's scroll height reflecting all rows + painted frame; DOM `.tree-row` count read back. |
+| Binary size (release, LTO, strip) | 10.2 MB | 10.2 MB | n/a | info | `ls -l src-tauri/target/release/atelier` |
+| Frontend bundle (dist/, embedded in binary) | 15.2 MB | 15.2 MB (Monaco chunk 3.9 MB) | n/a | info | `du -sk dist`. No .app bundle is produced by `--no-bundle` |
+
+## Notes
+- Idle CPU is only meaningful for an unfocused window; a focused editor pays WebKit's caret animation (see the focused-row method). All Atelier-owned timers are gated on window focus/visibility (`src/lib/activity.ts`): daemons status 30 s, Processes window 5 s, Claude sessions 30/60 s.
+- Monaco model eviction (clean background tabs beyond the 3 most recent) frees little RSS by itself (~10 MB at 10 tabs): per-tab growth is mostly retained JavaScriptCore heap, and the first editor mount costs ~50 MB; the point is fewer LSP documents and worker mirrors.
 
 ## Memory attribution notes
 - WebKit helpers (`com.apple.WebKit.WebContent`, `.GPU`, `.Networking`) are XPC services launched by launchd (ppid 1), so they cannot be found by parent pid, and
-  `responsibility_get_pid_responsible_for_pid` (see `scripts/qa/resp.swift`) did not attribute them to the app either. The bench snapshots the helper pids before launching and counts the ones that appear afterwards; run it with no other WebKit app starting at the same time (other Tauri/Safari launches would be counted).
+  `responsibility_get_pid_responsible_for_pid` (see `scripts/qa/resp.swift`) did not attribute them to the app either. The bench snapshots the helper pids before launching and counts the ones that appear afterwards; the set is locked 1.5 s after the window is ready, so a WebKit app started later in the run cannot be counted; `webkitAlreadyRunning` in the raw JSON records helpers of other apps that existed before launch (Alex's Chrome/Discord are not WebKit).
 - Children of the app (LSP servers, ptys, rg, git) are found with `ps -axo pid,ppid` on the app pid.
 
 ## Raw
@@ -28,125 +33,131 @@ Re-run: `scripts/bench.sh` (add `SKIP_BUILD=1` to reuse the current binary).
 {
  "project": "/Users/alexw/thematic-kyf",
  "build": "/Users/alexw/IdeaProjects/Atelier/src-tauri/target/release/atelier",
- "when": "2026-10-10T06:16:11.664Z",
+ "when": "2026-10-10T08:36:06.551Z",
  "machine": "Apple M1 Max, 26.5",
  "cold": {
   "runs": [
-   812,
-   1210,
-   773,
-   774,
-   779
+   738,
+   715,
+   730,
+   718,
+   744
   ],
-  "medianMs": 779,
-  "qaReadyMedianMs": 462
+  "medianMs": 730,
+  "qaReadyMedianMs": 419
  },
+ "webkitAlreadyRunning": 0,
  "rssFresh": {
-  "appMB": 110.3,
-  "webkitMB": 245,
+  "appMB": 111.1,
+  "webkitMB": 248.4,
   "childrenMB": 0,
-  "totalNoChildrenMB": 355.3,
-  "totalMB": 355.3
+  "totalNoChildrenMB": 359.5,
+  "totalMB": 359.5
  },
  "openFile": {
   "n": 10,
-  "medianMs": 21,
-  "maxMs": 174,
+  "medianMs": 20,
+  "maxMs": 160,
   "allMs": [
-   174,
-   26,
-   21,
-   21,
+   160,
+   23,
+   20,
    18,
-   19,
-   19,
-   18,
-   19,
-   23
+   16,
+   17,
+   20,
+   17,
+   17,
+   21
   ],
   "note": "Thematic .gd files, smallest..largest by size, first open (read + model + paint)"
  },
  "largestFile": {
   "path": "/Users/alexw/thematic-kyf/scripts/ui/character_hub.gd",
   "bytes": 62367,
-  "ms": 42
+  "ms": 45
  },
+ "liveModels": 4,
  "childList": [
   {
-   "pid": "6328",
-   "rssMB": 2161.5,
-   "cmd": "/Applications/Godot.app/Contents/MacOS/Godot --path /Users/alexw/thematic-kyf --editor --h"
-  },
-  {
-   "pid": "6329",
-   "rssMB": 1743.9,
+   "pid": "53066",
+   "rssMB": 2159.5,
    "cmd": "/Applications/Godot.app/Contents/MacOS/Godot --path /Users/alexw/thematic-kyf --editor --h"
   }
  ],
  "rss10Tabs": {
   "tabs": 10,
-  "appMB": 112.2,
-  "webkitMB": 375.7,
-  "childrenMB": 3905.4,
-  "totalNoChildrenMB": 487.9,
-  "totalMB": 4393.3,
+  "appMB": 112.9,
+  "webkitMB": 378.9,
+  "childrenMB": 2159.5,
+  "totalNoChildrenMB": 491.8,
+  "totalMB": 2651.3,
   "webkitProcs": 3,
-  "childProcs": 2
+  "childProcs": 1
  },
  "idleCpu": {
   "seconds": 30,
-  "appPct": 0.6,
-  "webkitPct": 1.2,
-  "childrenPct": 17,
-  "appPlusWebkitPct": 1.8
+  "appPct": 2.2,
+  "webkitPct": 4.7,
+  "childrenPct": 13.1,
+  "appPlusWebkitPct": 6.8,
+  "godotStat": "SN"
+ },
+ "idleCpuPaused": {
+  "seconds": 30,
+  "appPct": 0.1,
+  "webkitPct": 0.1,
+  "childrenPct": 0,
+  "appPlusWebkitPct": 0.1,
+  "godotStat": "TN"
  },
  "keystroke": {
   "n": 60,
-  "min": 5,
-  "p50": 6,
-  "p95": 16,
-  "max": 17,
+  "min": 4.999999999985448,
+  "p50": 6.999999999985448,
+  "p95": 17.000000000014552,
+  "max": 31,
   "dirtyAfter": 0
  },
  "searchEverywhere": {
   "allMs": [
-   21,
-   17,
-   52,
-   17
+   19,
+   18,
+   23,
+   23
   ],
-  "medianMs": 21,
+  "medianMs": 23,
   "note": "type -> first matching result row painted-in-DOM (includes UI debounce); first sample is warmest-index-miss"
  },
  "searchFilesBackend": {
-  "roundtripMs": 1.000000000007276,
-  "backendMs": 0.204458,
+  "roundtripMs": 0.9999999999854481,
+  "backendMs": 0.37054200000000004,
   "hits": 7
  },
  "findInFiles": [
   {
    "q": "func",
    "mask": "*.gd",
-   "firstMs": 5.000000000007276,
-   "doneMs": 20,
+   "firstMs": 8,
+   "doneMs": 26,
    "total": 4973,
-   "backendMs": 13.001792
+   "backendMs": 16.208333
   },
   {
    "q": "extends",
    "mask": "",
-   "firstMs": 42.000000000007276,
-   "doneMs": 129,
+   "firstMs": 42,
+   "doneMs": 104,
    "total": 459,
-   "backendMs": 127.334541
+   "backendMs": 103.1905
   },
   {
    "q": "TODO",
    "mask": "",
    "firstMs": null,
-   "doneMs": 63,
+   "doneMs": 56,
    "total": 0,
-   "backendMs": 62.745459000000004
+   "backendMs": 54.285624999999996
   },
   {
    "q": "func",
@@ -154,16 +165,16 @@ Re-run: `scripts/bench.sh` (add `SKIP_BUILD=1` to reuse the current binary).
    "firstMs": 5,
    "doneMs": 18,
    "total": 4973,
-   "backendMs": 11.045083
+   "backendMs": 10.214917
   }
  ],
  "tree10k": {
-  "ms": 533,
+  "ms": 534,
   "domRows": 46,
   "logicalRows": 10002
  },
  "sizes": {
-  "binaryMB": 10.1,
+  "binaryMB": 10.2,
   "distMB": 15.2,
   "bundleAppMB": null,
   "monacoChunkMB": 3.9

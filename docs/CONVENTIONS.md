@@ -58,11 +58,11 @@ Do not use osascript/System Events keystrokes or mouse automation: they hit what
 Instead (being built by the harness agent; contract fixed here):
 - Launch: `ATELIER_AUTOMATION=1 src-tauri/target/<profile>/atelier <path-or-host:/path>`. Only with that env var, the app
   listens on a unix socket (`$ATELIER_AUTOMATION_SOCK`, default `$TMPDIR/atelier-automation.sock`, mode 0600). Without it, no socket.
-- `node scripts/qa/eval.mjs '<async JS body>'` runs JS in the webview and prints the JSON-serialised return value.
+- `node scripts/qa/eval.mjs '<async JS body>'` (the request ends with a NUL byte; Node's `socket.end()` alone sometimes never delivers FIN, which used to surface as random "client timeout"s) runs JS in the webview and prints the JSON-serialised return value.
   Helpers on `window.__qa`: `key("meta L")` (IntelliJ keystroke syntax, dispatched as real-shaped keydown/keyup on the
   focused element), `tap("Shift")`, `type(text)` (Monaco: via `editor.trigger("keyboard","type",{text})`; inputs: value+input
   event), `waitFor(selectorOrFn, ms)`, `state()` (project, open tabs + dirty flags, active tool windows, focused area,
-  open popup id, cursor position), `actions()` (registered action ids + resolved keys), `sleep(ms)`.
+  open popup id, cursor position), `reset(path?)` (baseline: no popup, Project visible, no right/bottom tool window, `path` open + focused; smoke calls it before every check), `models(evict?)` (live Monaco models), `actions()` (registered action ids + resolved keys), `sleep(ms)`.
 - `scripts/qa/shot.sh <name>` captures the Atelier window (works while unfocused) into `scripts/qa/out/<name>.png`.
 - QA runs that open Alex's real projects must never save: check `state()` has no dirty tabs before closing, and
   `git -C <project> status --porcelain` before/after must be identical.

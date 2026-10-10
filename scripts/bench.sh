@@ -11,5 +11,5 @@ if [ -z "${SKIP_BUILD:-}" ]; then
 fi
 export OUT="$BENCH_TMP/bench.json"
 node scripts/qa/bench.mjs > "$BENCH_TMP/bench.log"
-node scripts/qa/perf-report.mjs "$OUT" docs/PERF.md
+node scripts/qa/perf-report.mjs "$OUT" docs/PERF.md "${BEFORE:-docs/perf-before.json}"  # 3rd arg: baseline JSON rendered in the "Before" column
 echo "wrote docs/PERF.md"

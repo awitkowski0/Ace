@@ -5,7 +5,7 @@ import { ProblemsIcon, SearchIcon } from "../../components/shell/icons";
 import { registerAction } from "../../actions/registry";
 import { registerPopup, openPopup } from "../../components/shell/popups";
 import { activeEditor, triggerEditor } from "../editorRegistry";
-import { activeServerReady, bootWhenNeeded, lsp, prewarmGodotWhenIdle } from "./api";
+import { activeServerReady, bootWhenNeeded, lsp, prewarmGodotWhenIdle, trackGodotFocus } from "./api";
 import { FileStructurePopup, IntentionsPopup, InspectionWidget, ProblemsPanel, UsagesPanel, gotoProblem } from "./ui";
 
 registerToolWindow({
@@ -45,3 +45,4 @@ mon("CodeCompletion", "Basic Completion", ["control SPACE"], "editor.action.trig
 
 bootWhenNeeded();
 prewarmGodotWhenIdle();
+trackGodotFocus();

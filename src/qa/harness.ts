@@ -3,7 +3,7 @@ import { key, tap } from "./keys";
 import { editorStore, openFile } from "../editor/store";
 import { activeEditor } from "../editor/editorRegistry";
 import { projectStore, openProject } from "../lib/project";
-import { layoutStore, focusedToolWindowId } from "../lib/layout";
+import { layoutStore, focusedToolWindowId, setActive } from "../lib/layout";
 import { listActions } from "../actions/registry";
 import { getBindings } from "../actions/keymap";
 import { local, invoke } from "../lib/ipc";
@@ -175,9 +175,28 @@ async function measureTree(dir: string, sub: string) {
   return { ms, domRows: document.querySelectorAll(".tree-row").length, logicalRows: Math.round(inner.offsetHeight / 24) };
 }
 
+/** Put the UI into a known baseline so a smoke check never depends on the previous one: no popup, Project tool window
+ * visible (unfocused), no right/bottom tool window, `path` open as the active tab with the editor focused. */
+async function reset(path?: string) {
+  for (let i = 0; i < 3 && document.querySelector(".popup"); i++) { closePopup(); await sleep(60); }
+  setActive("left", "project"); setActive("right", null); setActive("bottom", null);
+  if (path) await openFileQa(path);
+  await sleep(80);
+  activeEditor()?.focus();
+  await sleep(80);
+  return state();
+}
+
+/** Live Monaco models (for the background-tab eviction check) and optionally run the eviction now. */
+async function models(evict = false) {
+  const { monaco } = await import("../editor/monacoSetup");
+  if (evict) (await import("../editor/EditorArea")).evictBackgroundModels();
+  return monaco.editor.getModels().map((m) => m.uri.path.split("/").pop());
+}
+
 export function installQaHarness() {
   (window as any).__qa = {
-    key, tap, type, sleep, waitFor, state, actions, raf, afterPaint,
+    key, tap, type, sleep, waitFor, state, actions, raf, afterPaint, reset, models,
     openFile: openFileQa, invoke, afterPaintX: afterPaint, measureSearchEverywhere, measureFindInFiles, measureTree, searchText, openProject: (p: string) => openProject(local(p)), measureOpen, measureKeystroke,
     editor: () => activeEditor(),
     version: 1,

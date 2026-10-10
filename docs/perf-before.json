@@ -1,0 +1,141 @@
+{
+  "project": "/Users/alexw/thematic-kyf",
+  "build": "/Users/alexw/IdeaProjects/Atelier/src-tauri/target/release/atelier",
+  "when": "2026-10-10T07:24:55.656Z",
+  "machine": "Apple M1 Max, 26.5",
+  "cold": {
+    "runs": [
+      781,
+      743,
+      732,
+      753,
+      764
+    ],
+    "medianMs": 753,
+    "qaReadyMedianMs": 432
+  },
+  "webkitAlreadyRunning": 0,
+  "rssFresh": {
+    "appMB": 110.7,
+    "webkitMB": 246.7,
+    "childrenMB": 0,
+    "totalNoChildrenMB": 357.4,
+    "totalMB": 357.4
+  },
+  "openFile": {
+    "n": 10,
+    "medianMs": 20,
+    "maxMs": 166,
+    "allMs": [
+      166,
+      24,
+      20,
+      21,
+      17,
+      19,
+      19,
+      19,
+      18,
+      22
+    ],
+    "note": "Thematic .gd files, smallest..largest by size, first open (read + model + paint)"
+  },
+  "largestFile": {
+    "path": "/Users/alexw/thematic-kyf/scripts/ui/character_hub.gd",
+    "bytes": 62367,
+    "ms": 42
+  },
+  "childList": [
+    {
+      "pid": "34459",
+      "rssMB": 2159.4,
+      "cmd": "/Applications/Godot.app/Contents/MacOS/Godot --path /Users/alexw/thematic-kyf --editor --h"
+    }
+  ],
+  "rss10Tabs": {
+    "tabs": 10,
+    "appMB": 112.2,
+    "webkitMB": 374.1,
+    "childrenMB": 2159.4,
+    "totalNoChildrenMB": 486.3,
+    "totalMB": 2645.7,
+    "webkitProcs": 3,
+    "childProcs": 1
+  },
+  "idleCpu": {
+    "seconds": 30,
+    "appPct": 2.2,
+    "webkitPct": 4.7,
+    "childrenPct": 13.6,
+    "appPlusWebkitPct": 6.9
+  },
+  "keystroke": {
+    "n": 60,
+    "min": 5.000000000007276,
+    "p50": 7,
+    "p95": 18.000000000007276,
+    "max": 19,
+    "dirtyAfter": 0
+  },
+  "searchEverywhere": {
+    "allMs": [
+      20,
+      23,
+      22,
+      23
+    ],
+    "medianMs": 23,
+    "note": "type -> first matching result row painted-in-DOM (includes UI debounce); first sample is warmest-index-miss"
+  },
+  "searchFilesBackend": {
+    "roundtripMs": 1.000000000007276,
+    "backendMs": 0.29541700000000004,
+    "hits": 7
+  },
+  "findInFiles": [
+    {
+      "q": "func",
+      "mask": "*.gd",
+      "firstMs": 6,
+      "doneMs": 23,
+      "total": 4973,
+      "backendMs": 13.752708
+    },
+    {
+      "q": "extends",
+      "mask": "",
+      "firstMs": 42,
+      "doneMs": 115,
+      "total": 459,
+      "backendMs": 113.819917
+    },
+    {
+      "q": "TODO",
+      "mask": "",
+      "firstMs": null,
+      "doneMs": 56.000000000007276,
+      "total": 0,
+      "backendMs": 55.291582999999996
+    },
+    {
+      "q": "func",
+      "mask": "*.gd",
+      "firstMs": 6,
+      "doneMs": 19,
+      "total": 4973,
+      "backendMs": 11.15
+    }
+  ],
+  "tree10k": {
+    "ms": 676.9999999999927,
+    "domRows": 46,
+    "logicalRows": 10002
+  },
+  "sizes": {
+    "binaryMB": 10.2,
+    "distMB": 15.2,
+    "bundleAppMB": null,
+    "monacoChunkMB": 3.9
+  },
+  "gitClean": true
+}

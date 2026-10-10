@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { onWindowActive, windowActive } from "../../lib/activity";
 import { invoke, basename } from "../../lib/ipc";
 import { useStore } from "../../lib/store";
 import type { ToolWindowProps } from "../../toolwindows/registry";
@@ -50,7 +51,7 @@ export function ClaudePanel({ root }: ToolWindowProps) {
   // Refresh: local via watcher, remote every 30s, only while mounted (= visible) and the window is visible.
   useEffect(() => {
     const doRefresh = () => {
-      if (!document.hidden) active.forEach((h) => void refreshHost(h));
+      if (windowActive()) active.forEach((h) => void refreshHost(h));
     };
     doRefresh();
     const hasRemote = active.some((h) => h !== "local");
@@ -61,10 +62,12 @@ export function ClaudePanel({ root }: ToolWindowProps) {
     let un: (() => void) | undefined;
     if (active.includes("local")) {
       claudeApi.watch().catch(() => {});
-      claudeApi.onChanged(() => active.includes("local") && !document.hidden && void refreshHost("local")).then((u) => (un = u));
+      claudeApi.onChanged(() => active.includes("local") && windowActive() && void refreshHost("local")).then((u) => (un = u));
     }
+    const off = onWindowActive(doRefresh);
     return () => {
       clearInterval(iv);
+      off();
       un?.();
       claudeApi.unwatch().catch(() => {});
     };

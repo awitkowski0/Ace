@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { onWindowActive, windowActive } from "../../lib/activity";
 import { CpuIcon } from "../shell/icons";
 import { toggleToolWindow } from "../../lib/layout";
 import { projectStore } from "../../lib/project";
@@ -31,13 +32,14 @@ export function DaemonsStatusWidget() {
   useEffect(() => {
     let dead = false;
     const tick = () => {
-      if (document.visibilityState !== "visible") return;
+      if (!windowActive()) return;
       daemonsApi.summary().then((r) => !dead && setLocal(r)).catch(() => {});
       for (const h of remote) daemonsApi.summary(h).then((r) => !dead && setRem((m) => ({ ...m, [h]: r }))).catch(() => {});
     };
     tick();
     const t = setInterval(tick, 30000);
-    return () => { dead = true; clearInterval(t); };
+    const off = onWindowActive(tick);
+    return () => { dead = true; clearInterval(t); off(); };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const part = (label: string, s: Sum | null | undefined) => `${label}: ${s ? `${s.gradleCount} · ${fmtBytes(s.rss)}` : "—"}`;
   const text = [part("Gradle", local), ...remote.map((h) => part(h, rem[h]))].join("  ");

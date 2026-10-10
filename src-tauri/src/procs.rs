@@ -117,6 +117,7 @@ fn kill_entries(mut entries: Vec<Entry>) {
         }
     }
     for (pid, leader) in &targets {
+        signal(*pid, *leader, libc::SIGCONT); // a SIGSTOPped process (paused headless Godot) would never act on SIGTERM
         signal(*pid, *leader, libc::SIGTERM);
     }
     let reap = |entries: &mut Vec<Entry>| {
@@ -342,6 +343,11 @@ pub fn install() {
     let _ = std::thread::Builder::new().name("procs-reaper".into()).spawn(|| {
         reap_stale();
     });
+}
+
+/// Pid of a registered process (None once unregistered / killed).
+pub fn pid(id: u64) -> Option<u32> {
+    reg().lock().unwrap().map.get(&id).and_then(|e| e.pid)
 }
 
 pub fn list() -> Vec<TrackedProc> {

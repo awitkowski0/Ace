@@ -1,9 +1,9 @@
 /** Eager facade: loads the monaco-dependent manager only when an LSP language is actually in use. */
 import { editorStore } from "../store";
-import { invoke, fs } from "../../lib/ipc";
+import { invoke, listen, fs } from "../../lib/ipc";
 import { projectStore } from "../../lib/project";
 import { SERVER_FOR_LANGUAGE } from "./servers";
-import { lspSettings, statusStore } from "./state";
+import { godotPaused, lspSettings, statusStore } from "./state";
 
 const mgr = () => import("./manager");
 
@@ -66,5 +66,24 @@ export function prewarmGodotWhenIdle() {
     }, 2500);
   };
   projectStore.subscribe(check);
+  check();
+}
+
+/**
+ * Tell the backend whether a .gd editor is focused (active tab is GDScript in a focused window): the backend suspends the
+ * headless Godot after 20 s without LSP traffic unless this is true, and resumes it as soon as it becomes true.
+ */
+export function trackGodotFocus() {
+  let last: boolean | undefined;
+  const check = () => {
+    const f = document.hasFocus() && activeDoc()?.language === "gdscript";
+    if (f === last) return;
+    last = f;
+    invoke("lsp_godot_focus", { focused: f }).catch(() => {});
+  };
+  editorStore.subscribe(check);
+  window.addEventListener("focus", check);
+  window.addEventListener("blur", check);
+  void listen<boolean>("lsp://godot-paused", (e) => godotPaused.set({ paused: !!e.payload }));
   check();
 }

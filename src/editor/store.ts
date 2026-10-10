@@ -258,7 +258,7 @@ export async function reloadIfChanged(key: string) {
   if (!d || d.dirty || d.error) return;
   const text = await fs.readFile(d.loc).catch(() => null);
   if (text === null || text === d.saved) return;
-  editorStore.set((s) => ({ docs: { ...s.docs, [key]: { ...s.docs[key], saved: text, dirty: false } } }));
+  editorStore.set((s) => ({ docs: { ...s.docs, [key]: { ...s.docs[key], saved: text, initial: text, dirty: false } } })); // initial: a model evicted from a background tab is recreated from it
   setText(key, text);
 }
 

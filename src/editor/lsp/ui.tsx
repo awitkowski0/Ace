@@ -8,7 +8,7 @@ import { activeEditor } from "../editorRegistry";
 import { PopupShell, type PopupProps } from "../../components/shell/popups";
 import { showToolWindow } from "../../lib/layout";
 import { showContextMenu } from "../../components/shell/contextMenu";
-import { diagStore, lspSettings, setAutoGodot, statusStore, usagesStore, type Diag } from "./state";
+import { diagStore, godotPaused, lspSettings, setAutoGodot, statusStore, usagesStore, type Diag } from "./state";
 import { activeDoc, activeServerId, lsp } from "./api";
 import { openAt } from "./navigate";
 import { SERVER_LABEL } from "./servers";
@@ -125,6 +125,7 @@ export function InspectionWidget() {
   const { servers } = useStore(statusStore);
   useStore(editorStore);
   useStore(lspSettings);
+  const { paused } = useStore(godotPaused);
   const d = activeDoc();
   const sid = activeServerId();
   if (!d || !sid) return null;
@@ -148,6 +149,9 @@ export function InspectionWidget() {
   if (st?.state === "starting") return <span className="sb-item sb-lsp" onClick={menu}>Starting {label} language server…</span>;
   if (st?.state === "error") return <span className="sb-item sb-lsp warn" title={st.hint}>{label} language server failed</span>;
   if (st?.state !== "ready") return null;
+  if (sid === "godot" && paused) {
+    return <span className="sb-item sb-lsp" title="Headless Godot is suspended while idle; it resumes on the next request" onClick={menu}>{label}: paused</span>;
+  }
   return (
     <span className="sb-item sb-lsp" title={`${label} language server`} onClick={menu}>
       {st.progress && <span className="dim" style={{ color: "var(--fg-dim)" }}>{st.progress}</span>}

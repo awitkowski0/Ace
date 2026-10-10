@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { onWindowActive, windowActive } from "../../lib/activity";
 import { invoke } from "../../lib/ipc";
 import { confirmDialog, promptDialog } from "../shell/dialogs";
 import { showContextMenu } from "../shell/contextMenu";
@@ -71,8 +72,9 @@ function ProcessesTab({ host }: { host: string }) {
     setRows([]);
     setSel(new Set());
     refresh();
-    const t = setInterval(() => document.visibilityState === "visible" && refresh(), 5000);
-    return () => clearInterval(t);
+    const t = setInterval(() => windowActive() && refresh(), 5000);
+    const off = onWindowActive(refresh);
+    return () => { clearInterval(t); off(); };
   }, [refresh]);
 
   const sorted = useMemo(() => {

@@ -35,6 +35,39 @@ installModelBridge({
   dispose: (key) => monaco.editor.getModel(modelUri(key))?.dispose(),
 });
 
+// ---- background model eviction ----
+/** Models kept alive besides the visible ones: this many most-recently-used tabs. */
+const LIVE_MRU = 3;
+/**
+ * Dispose the Monaco model (piece tree, token cache, worker mirror, LSP document) of clean background tabs beyond the
+ * `LIVE_MRU` most recent. The tab, its text (`Doc.initial`/`saved`) and its view state (kept per path by
+ * @monaco-editor/react) survive; activating the tab recreates the model from the text. Models that were ever edited
+ * (`getVersionId() > 1`, i.e. they carry undo history) or are dirty are kept, so undo is never lost.
+ */
+export function evictBackgroundModels() {
+  const { docs, groups, recent } = editorStore.get();
+  const live = new Set(recent.slice(0, LIVE_MRU));
+  for (const g of Object.values(groups)) if (g.active) live.add(g.active);
+  let n = 0;
+  for (const d of Object.values(docs)) {
+    if (d.kind === "diff" || d.error || d.dirty || live.has(d.key)) continue;
+    const m = monaco.editor.getModel(modelUri(d.key));
+    if (!m || m.isAttachedToEditor() || m.getVersionId() > 1) continue;
+    m.dispose();
+    n++;
+  }
+  return n;
+}
+let evictTimer: number | undefined;
+let lastRecent: string[] | undefined;
+editorStore.subscribe(() => {
+  const r = editorStore.get().recent;
+  if (r === lastRecent) return;
+  lastRecent = r;
+  clearTimeout(evictTimer);
+  evictTimer = window.setTimeout(evictBackgroundModels, 1500);
+});
+
 /** IntelliJ default editor settings (JetBrains Mono 13, ligatures off, no wrapping/whitespace, blinking 2px caret). */
 const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   fontFamily: '"JetBrains Mono", Menlo, monospace',

@@ -18,6 +18,9 @@ export const statusStore = createStore<{ servers: Record<string, ServerStatus>; 
 export const setServerStatus = (id: string, s: ServerStatus) =>
   statusStore.set((st) => ({ servers: { ...st.servers, [id]: s } }));
 
+/** Headless Godot is SIGSTOPped by the backend while idle (src-tauri/src/lsp/mod.rs, "GodotPause"). */
+export const godotPaused = createStore<{ paused: boolean }>({ paused: false });
+
 export interface UsageItem { loc: LspLocation; line: string }
 export const usagesStore = createStore<{ title: string; items: UsageItem[]; busy: boolean }>({ title: "", items: [], busy: false });
 

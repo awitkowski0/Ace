@@ -12,8 +12,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 const GODOT_ADDR: &str = "127.0.0.1:6005";
@@ -30,6 +31,95 @@ pub struct LspState {
     next: Mutex<u64>,
     /// Pre-warmed headless Godot (one per app; replaced when another project warms up).
     warm: Mutex<Option<Warm>>,
+    pause: GodotPause,
+}
+
+/// Idle suspension of OUR headless Godot (never a user-launched editor on 6005, which we do not own).
+/// Idle headless Godot burns 4-13% CPU and no CLI flag helps, so after `PAUSE_AFTER` without LSP traffic and without a
+/// focused .gd editor the whole process group gets SIGSTOP; the next outgoing message / focus SIGCONTs it first.
+#[derive(Default)]
+struct GodotPause {
+    last_ms: AtomicU64,
+    gd_focus: AtomicBool,
+    paused: AtomicBool,
+    watcher: AtomicBool,
+}
+
+const PAUSE_AFTER: Duration = Duration::from_secs(20);
+
+fn now_ms() -> u64 {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    BASE.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+impl GodotPause {
+    fn touch(&self) {
+        self.last_ms.store(now_ms(), Ordering::Relaxed);
+    }
+}
+
+fn warm_pid(st: &LspState) -> Option<u32> {
+    st.warm.lock().unwrap().as_ref().and_then(|w| w.proc_id).and_then(crate::procs::pid)
+}
+
+/// SIGCONT our Godot if it is suspended. Cheap when it is not. Returns true if it had to be resumed.
+fn resume_godot(app: &AppHandle) -> bool {
+    let st = app.state::<LspState>();
+    st.pause.touch();
+    if !st.pause.paused.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    if let Some(pid) = warm_pid(&st) {
+        unsafe { libc::killpg(pid as i32, libc::SIGCONT) };
+    }
+    let _ = app.emit("lsp://godot-paused", false);
+    true
+}
+
+fn pause_tick(app: &AppHandle) {
+    let st = app.state::<LspState>();
+    let pid = warm_pid(&st);
+    let paused = st.pause.paused.load(Ordering::SeqCst);
+    match pid {
+        None if paused => {
+            st.pause.paused.store(false, Ordering::SeqCst);
+            let _ = app.emit("lsp://godot-paused", false);
+        }
+        Some(pid) if !paused => {
+            let idle = now_ms().saturating_sub(st.pause.last_ms.load(Ordering::Relaxed));
+            if idle >= PAUSE_AFTER.as_millis() as u64 && !st.pause.gd_focus.load(Ordering::Relaxed) {
+                st.pause.paused.store(true, Ordering::SeqCst);
+                unsafe { libc::killpg(pid as i32, libc::SIGSTOP) };
+                let _ = app.emit("lsp://godot-paused", true);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// One watcher thread per app, started when the first Godot of ours becomes ready.
+fn start_pause_watcher(app: &AppHandle) {
+    let st = app.state::<LspState>();
+    if st.pause.watcher.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::Builder::new().name("godot-pause".into()).spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(2));
+        pause_tick(&app);
+    }).ok();
+}
+
+/// Frontend: a .gd editor is (not) the focused editor of a focused window. Focusing resumes immediately.
+#[tauri::command]
+pub fn lsp_godot_focus(app: AppHandle, focused: bool) {
+    let st = app.state::<LspState>();
+    st.pause.gd_focus.store(focused, Ordering::Relaxed);
+    if focused {
+        resume_godot(&app);
+    } else {
+        st.pause.touch(); // start the 20s idle clock from the moment the editor loses focus
+    }
 }
 
 struct Warm {
@@ -124,6 +214,8 @@ fn ensure_godot_with(st: &LspState, root: &str, spawn: Spawner) -> Result<u16, S
             Ok((port, id, _sock)) => {
                 if ours {
                     *w = Some(Warm { root: root.to_string(), port, proc_id: Some(id) });
+                    st.pause.touch();
+                    st.pause.paused.store(false, Ordering::SeqCst);
                     Ok(port)
                 } else {
                     crate::procs::kill(id); // superseded while starting
@@ -154,7 +246,9 @@ fn prewarm_blocking(app: AppHandle, root: String) -> Result<(), String> {
     if connect_tcp(GODOT_ADDR).is_ok() {
         return Ok(()); // an editor already serves 6005: reuse it, nothing to warm
     }
-    ensure_godot(&st, &root).map(|_| ())
+    let r = ensure_godot(&st, &root).map(|_| ());
+    start_pause_watcher(&app);
+    r
 }
 
 /// Idle headless Godot costs ~10% CPU and ~1.5 GB (--max-fps / --frame-delay / --fixed-fps measured: no change),
@@ -341,6 +435,7 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
                 }
                 let mut tries = 0;
                 loop {
+                    resume_godot(&app); // a suspended Godot accepts TCP (kernel backlog) but cannot answer
                     let port = ensure_godot(&st, &root).map_err(|m| if m.contains("not found") { format!("unreachable: {e}") } else { m })?;
                     match connect_tcp(&format!("127.0.0.1:{port}")) {
                         Ok(s) => break s,
@@ -353,6 +448,7 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
                 }
             }
         };
+        start_pause_watcher(&app);
         let rd = sock.try_clone().map_err(|e| e.to_string())?;
         let wr = sock.try_clone().map_err(|e| e.to_string())?;
         let tx = spawn_writer(wr);
@@ -360,7 +456,10 @@ fn start_blocking(app: AppHandle, server_id: String, root: String, auto_godot: b
         let (a, i) = (app.clone(), id.clone());
         std::thread::spawn(move || {
             let ev = format!("lsp://msg/{i}");
-            read_loop(rd, |m| { let _ = a.emit(&ev, m); });
+            read_loop(rd, |m| {
+                a.state::<LspState>().pause.touch(); // incoming traffic (diagnostics etc.) keeps Godot awake
+                let _ = a.emit(&ev, m);
+            });
             finish(&a, &i);
         });
         return Ok(id);
@@ -393,7 +492,10 @@ pub async fn lsp_start(app: AppHandle, server_id: String, root: String, auto_god
 }
 
 #[tauri::command]
-pub fn lsp_send(state: State<'_, LspState>, session_id: String, json: String) -> Result<(), String> {
+pub fn lsp_send(app: AppHandle, state: State<'_, LspState>, session_id: String, json: String) -> Result<(), String> {
+    if session_id.starts_with("godot-") {
+        resume_godot(&app); // SIGCONT before the message is queued to the socket, so Godot sees it as soon as it runs
+    }
     let g = state.sessions.lock().unwrap();
     let s = g.get(&session_id).ok_or("no such session")?;
     s.tx.send(json.into_bytes()).map_err(|_| "session closed".to_string())
