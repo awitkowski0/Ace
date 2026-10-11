@@ -5,7 +5,7 @@ import { getToolWindow } from "../../toolwindows/registry";
  * Tool windows that share ONE stripe button and header tab strip (IntelliJ shows Usages inside the "Find" window).
  * The first id is the stripe button; the others are tabs of the same window.
  */
-export const TOOL_GROUPS: string[][] = [["find", "usages"]];
+export const TOOL_GROUPS: string[][] = [["find", "usages"], ["project", "claude"]];
 
 export const groupOf = (id: string): string[] | undefined => TOOL_GROUPS.find((g) => g.includes(id));
 /** Group members that are registered (a module may be absent). */
@@ -23,8 +23,12 @@ export const activeMemberOf = (id: string): string | null => {
 
 /** Activate<X>ToolWindow (keyboard): toggle the group as one window, remembering which tab was showing. */
 export function toggleGroup(id: string) {
-  toggleToolWindow(activeMemberOf(id) ?? id);
+  const cur = activeMemberOf(id);
+  // Project / AI Sessions behave like IntelliJ's Project view switcher: asking for the other member (⌘1 vs ⌃⌥C) switches to it.
+  if (cur && cur !== id && TAB_SWITCH.has(groupOf(id)![0])) return selectGroupTab(id);
+  toggleToolWindow(cur ?? id);
 }
+const TAB_SWITCH = new Set(["project"]);
 /** Stripe-button click: re-clicking the button of a visible tool window (or group) closes it. */
 export function clickGroup(id: string) {
   clickToolWindow(activeMemberOf(id) ?? id);

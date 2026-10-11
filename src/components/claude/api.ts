@@ -2,6 +2,8 @@ import { invoke, listen, type Location } from "../../lib/ipc";
 import { createStore } from "../../lib/store";
 import { projectStore, openProject } from "../../lib/project";
 import { openTerminal } from "../terminal/api";
+import { registerLaunch, tabTitleFor } from "./ai";
+import { focusSessionTerminal } from "./flip";
 
 export interface SessionInfo {
   id: string;
@@ -90,11 +92,18 @@ export function unknownRunning(d: HostData | undefined): Map<string, number> {
 }
 
 const L = (s: { host: string }) => ({ host: s.host, login: true });
+/** Start `claude ...` in a terminal tab and remember which session lives there (flip, badges, notifications). */
+const start = (host: string, cwd: string, command: string, title: string, sessionId?: string) => {
+  const tab = openTerminal({ ...L({ host }), cwd, command, title });
+  registerLaunch(tab, { host, cwd, sessionId, title });
+  return tab;
+};
 export const launch = {
-  newSession: (host: string, cwd: string) => openTerminal({ ...L({ host }), cwd, command: "claude", title: "Claude" }),
-  resume: (s: SessionInfo) => openTerminal({ ...L(s), cwd: s.cwd, command: `claude --resume ${s.id}`, title: `Claude: ${s.title.slice(0, 24)}` }),
-  fork: (s: SessionInfo) => openTerminal({ ...L(s), cwd: s.cwd, command: `claude --resume ${s.id} --fork-session`, title: `Claude fork: ${s.title.slice(0, 20)}` }),
-  continueLast: (host: string, cwd: string) => openTerminal({ ...L({ host }), cwd, command: "claude -c", title: "Claude (continue)" }),
+  newSession: (host: string, cwd: string) => start(host, cwd, "claude", "Claude"),
+  /** A session that already runs in an Ace terminal is focused instead of resumed twice. */
+  resume: (s: SessionInfo) => (focusSessionTerminal(s.host, s.id) ? null : start(s.host, s.cwd, `claude --resume ${s.id}`, tabTitleFor(s.title), s.id)),
+  fork: (s: SessionInfo) => start(s.host, s.cwd, `claude --resume ${s.id} --fork-session`, `Claude fork: ${s.title.slice(0, 20)}`),
+  continueLast: (host: string, cwd: string) => start(host, cwd, "claude -c", "Claude (continue)"),
 };
 
 export const openSessionProject = (s: SessionInfo) => openProject({ host: s.host, path: s.cwd } as Location);

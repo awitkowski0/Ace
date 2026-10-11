@@ -58,6 +58,10 @@ export const joinPath = (dir: string, name: string) => (dir.endsWith("/") ? dir 
 export const fs = {
   listDir: (loc: Location) => invoke<DirEntry[]>("fs_list_dir", { loc }),
   readFile: (loc: Location) => invoke<string>("fs_read_file", { loc }),
+  /** raw bytes (ArrayBuffer, no base64); optional [offset, offset+len) range */
+  readBytes: (loc: Location, offset?: number, len?: number) => invoke<ArrayBuffer>("fs_read_bytes", { loc, offset, len }),
+  /** size + binary sniff (NUL / invalid UTF-8 in the first 8 KB) */
+  probe: (loc: Location) => invoke<{ size: number; binary: boolean; modified: number | null }>("fs_probe", { loc }),
   writeFile: (loc: Location, contents: string) => invoke<void>("fs_write_file", { loc, contents }),
   stat: (loc: Location) => invoke<FileStat>("fs_stat", { loc }),
   rename: (from: Location, to: Location) => invoke<void>("fs_rename", { from, to }),

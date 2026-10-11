@@ -205,38 +205,116 @@ fn signal(pid: u32, leader: bool, sig: i32) {
     }
 }
 
-/// pid plus all descendants (via `ps`), flagged with whether each leads its own group.
+/// Command-line fragments of shared build daemons. They are NEVER signalled by a window close / Stop: a Gradle client that just
+/// spawned a daemon would otherwise take it down with its process group, and every other build using it with it.
+const PROTECTED_CMDS: [&str; 2] = ["org.gradle.launcher.daemon.bootstrap.GradleDaemon", "org.jetbrains.kotlin.daemon.KotlinCompileDaemon"];
+
+pub fn is_protected_cmd(cmd: &str) -> bool {
+    PROTECTED_CMDS.iter().any(|m| cmd.contains(m))
+}
+
+#[derive(Clone)]
+struct Pi {
+    pid: u32,
+    ppid: u32,
+    pgid: u32,
+    cmd: String,
+}
+
+fn take_u32(s: &mut &str) -> Option<u32> {
+    let t = s.trim_start();
+    let end = t.find(char::is_whitespace).unwrap_or(t.len());
+    let v = t[..end].parse().ok()?;
+    *s = &t[end..];
+    Some(v)
+}
+
+fn parse_ps_line(l: &str) -> Option<Pi> {
+    let mut r = l;
+    let pid = take_u32(&mut r)?;
+    let ppid = take_u32(&mut r)?;
+    let pgid = take_u32(&mut r)?;
+    Some(Pi { pid, ppid, pgid, cmd: r.trim().to_string() })
+}
+
+fn process_table_full() -> Vec<Pi> {
+    let Ok(o) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,ppid=,pgid=,command="]).stdin(std::process::Stdio::null()).output() else {
+        return vec![];
+    };
+    String::from_utf8_lossy(&o.stdout).lines().filter_map(parse_ps_line).collect()
+}
+
+/// Pids that must survive: every protected daemon and everything below it (workers, forked JVMs).
+fn protected_pids(table: &[Pi]) -> std::collections::HashSet<u32> {
+    let mut prot: std::collections::HashSet<u32> = table.iter().filter(|p| is_protected_cmd(&p.cmd)).map(|p| p.pid).collect();
+    loop {
+        let before = prot.len();
+        for p in table {
+            if prot.contains(&p.ppid) {
+                prot.insert(p.pid);
+            }
+        }
+        if prot.len() == before {
+            break;
+        }
+    }
+    prot
+}
+
+/// pid plus all descendants (via `ps`), flagged with whether each leads its own group. Protected daemons (and their subtrees) are
+/// left out; a group that contains one is not signalled as a group but member by member.
 fn collect_tree(root: u32, out: &mut Vec<(u32, bool)>) {
     if root <= 1 || root == std::process::id() {
         return;
     }
-    let table = process_table();
+    let table = process_table_full();
+    let prot = protected_pids(&table);
     let mut stack = vec![root];
     while let Some(p) = stack.pop() {
-        if out.iter().any(|(q, _)| *q == p) {
+        if out.iter().any(|(q, _)| *q == p) || prot.contains(&p) {
             continue;
         }
         let leader = unsafe { libc::getpgid(p as i32) } == p as i32;
-        out.push((p, leader));
-        for (c, pp) in &table {
-            if *pp == p {
-                stack.push(*c);
+        let group_has_protected = leader && table.iter().any(|q| q.pgid == p && prot.contains(&q.pid));
+        if group_has_protected {
+            // no killpg: the daemon shares the group. Take the unprotected members one by one.
+            out.push((p, false));
+            for q in table.iter().filter(|q| q.pgid == p && !prot.contains(&q.pid)) {
+                stack.push(q.pid);
             }
+        } else {
+            out.push((p, leader));
+        }
+        for c in table.iter().filter(|c| c.ppid == p) {
+            stack.push(c.pid);
         }
     }
 }
 
-fn process_table() -> Vec<(u32, u32)> {
-    let Ok(o) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid="]).stdin(std::process::Stdio::null()).output() else {
-        return vec![];
-    };
-    String::from_utf8_lossy(&o.stdout)
-        .lines()
-        .filter_map(|l| {
-            let mut it = l.split_whitespace();
-            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
-        })
-        .collect()
+/// Kill every process whose command line contains one of `markers` (TERM, then KILL after `grace`), never a protected daemon.
+/// Used for the game JVM of a Gradle debug run: it is a child of the daemon, so it is not part of the client's tree.
+/// Returns the pids that were signalled.
+pub fn kill_marked(markers: &[String], grace: std::time::Duration) -> Vec<u32> {
+    let table = process_table_full();
+    let me = std::process::id();
+    let hit: Vec<u32> = table
+        .iter()
+        .filter(|p| p.pid != me && !is_protected_cmd(&p.cmd) && markers.iter().any(|m| !m.is_empty() && p.cmd.contains(m.as_str())))
+        .map(|p| p.pid)
+        .collect();
+    for p in &hit {
+        signal(*p, false, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + grace;
+    while hit.iter().any(|p| alive(*p)) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    for p in &hit {
+        if alive(*p) {
+            signal(*p, false, libc::SIGKILL);
+        }
+    }
+    hit
 }
 
 /// Call before `spawn()`: the child becomes the leader of a new process group, so the group can be killed as a unit
@@ -400,4 +478,77 @@ pub fn procs_list() -> Vec<TrackedProc> {
 #[tauri::command]
 pub fn procs_kill(id: u64) {
     kill(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    fn wait_gone(pid: u32) -> bool {
+        for _ in 0..100 {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        false
+    }
+    /// pid of the process whose command line contains `needle` (the fake daemon is not our direct child)
+    fn find(needle: &str) -> Option<u32> {
+        process_table_full().into_iter().find(|p| p.cmd.ends_with(needle)).map(|p| p.pid)
+    }
+
+    #[test]
+    fn parses_ps_lines() {
+        let p = parse_ps_line("  123   45   123 /bin/sh -c echo  hi").unwrap();
+        assert_eq!((p.pid, p.ppid, p.pgid, p.cmd.as_str()), (123, 45, 123, "/bin/sh -c echo  hi"));
+    }
+
+    /// Window close / Stop kills the client's tree and process group but never a GradleDaemon sharing that group (or hanging below the client).
+    #[test]
+    fn kill_spares_gradle_daemons() {
+        let tag = format!("acetest{}", std::process::id());
+        // client shell (own process group, like runner::local_command): starts a fake daemon in the SAME group, a worker child of the
+        // daemon, and an ordinary child that must die with the client.
+        let script = format!(
+            "(sh -c 'sleep 60; true' org.gradle.launcher.daemon.bootstrap.Grad\"\"leDaemon {tag}d &) ; (sh -c 'sleep 61; true' {tag}c &) ; sh -c 'sleep 62; true' {tag}x"
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        group(&mut cmd);
+        let child = cmd.spawn().unwrap();
+        let client = child.id();
+        let id = register("test", "fake gradle client", child);
+        std::thread::sleep(Duration::from_millis(500));
+        let daemon = find(&format!("{tag}d")).expect("fake daemon running");
+        let other = find(&format!("{tag}c")).expect("ordinary child running");
+        assert_eq!(unsafe { libc::getpgid(daemon as i32) }, client as i32, "daemon shares the client's group");
+        kill(id);
+        assert!(wait_gone(client), "client killed");
+        assert!(wait_gone(other), "ordinary child killed with the client");
+        assert!(alive(daemon), "daemon survived the client's kill");
+        // marker kill never touches a daemon even when the marker matches
+        let hit = kill_marked(&[tag.clone()], Duration::from_millis(300));
+        assert!(!hit.contains(&daemon) && alive(daemon));
+        unsafe { libc::kill(daemon as i32, libc::SIGKILL) };
+        assert!(wait_gone(daemon));
+    }
+
+    #[test]
+    fn kill_marked_kills_only_matches() {
+        let tag = format!("acemark{}", std::process::id());
+        let a = Command::new("/bin/sh").args(["-c", &format!("sleep 63; true # {tag}")]).spawn().unwrap();
+        let mut b = Command::new("/bin/sleep").arg("64").spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let ap = a.id();
+        let mut a = a;
+        let hit = kill_marked(&[tag], Duration::from_millis(300));
+        let _ = a.wait();
+        assert!(hit.contains(&ap), "{hit:?}");
+        assert!(b.try_wait().unwrap().is_none(), "unrelated process untouched");
+        let _ = b.kill();
+        let _ = b.wait();
+    }
 }

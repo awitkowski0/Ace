@@ -22,3 +22,6 @@
 .claude-badge.host { background: var(--nord3); color: var(--fg); }
 .claude-empty { padding: 16px; color: var(--fg-dim); }
 .claude-err { padding: 6px 8px; color: var(--nord11); font-size: 12px; }
+.claude-badge.done { background: var(--nord14); color: #2e3440; }
+.claude-badge.question { background: var(--nord12); color: #2e3440; }
+.claude-badge.term { background: var(--bg-selected); color: var(--fg); }

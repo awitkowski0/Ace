@@ -32,13 +32,21 @@ export class LspClient {
     if (this.closed) return Promise.resolve();
     return invoke<void>("lsp_send", { sessionId: this.sessionId, json: JSON.stringify(o) }).catch(() => {});
   }
-  request<T = Json>(method: string, params: Json, timeoutMs = 30000): Promise<T> {
+  /** `cancel` (a Monaco CancellationToken): sends `$/cancelRequest` and rejects as soon as it fires. */
+  request<T = Json>(method: string, params: Json, timeoutMs = 30000, cancel?: { onCancellationRequested(cb: () => void): unknown }): Promise<T> {
     if (this.closed) return Promise.reject(new Error("closed"));
     const id = this.seq++;
     return new Promise<T>((res, rej) => {
       const t = setTimeout(() => { this.pending.delete(id); rej(new Error(`${method} timed out`)); }, timeoutMs);
       this.pending.set(id, { res: (v) => { clearTimeout(t); res(v); }, rej: (e) => { clearTimeout(t); rej(e); } });
       this.send({ jsonrpc: "2.0", id, method, params });
+      cancel?.onCancellationRequested(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        clearTimeout(t);
+        this.notifyServer("$/cancelRequest", { id });
+        rej(new Error("cancelled"));
+      });
     });
   }
   notifyServer(method: string, params: Json) { this.send({ jsonrpc: "2.0", method, params }); }
@@ -102,7 +110,7 @@ export class LspClient {
 const MD = ["markdown", "plaintext"];
 const CLIENT_CAPS = {
   general: { positionEncodings: ["utf-16"] },
-  workspace: { applyEdit: true, workspaceEdit: { documentChanges: true }, configuration: true, workspaceFolders: true, didChangeConfiguration: {} },
+  workspace: { applyEdit: true, workspaceEdit: { documentChanges: true }, configuration: true, workspaceFolders: true, didChangeConfiguration: {}, semanticTokens: { refreshSupport: true } },
   window: { workDoneProgress: true },
   textDocument: {
     synchronization: { didSave: true, dynamicRegistration: false },
@@ -121,6 +129,12 @@ const CLIENT_CAPS = {
     implementation: { linkSupport: true },
     references: {},
     documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+    semanticTokens: {
+      requests: { full: true, range: false },
+      tokenTypes: ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
+      tokenModifiers: ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
+      formats: ["relative"], overlappingTokenSupport: false, multilineTokenSupport: false, serverCancelSupport: true, augmentsSyntaxTokens: true,
+    },
     formatting: {},
     rangeFormatting: {},
     rename: { prepareSupport: true },

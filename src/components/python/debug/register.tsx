@@ -65,12 +65,14 @@ registerAction({ id: "RerunDebug", title: "Rerun", intellijId: "Rerun", defaultK
 
 // ---------------------------------------------------------------- editor integration (only for Python projects)
 let installed = false;
-function install() {
-  if (installed || !pyStore.get().active) return;
+/** `force`: another debuggable language (GDScript) wants the gutter / execution marks without a Python project. */
+export function installEditorDebug(force = false) {
+  if (installed || !(force || pyStore.get().active)) return;
   installed = true;
   installGutter();
   installExecution();
 }
+const install = () => installEditorDebug();
 pyStore.subscribe(install);
 install();
 

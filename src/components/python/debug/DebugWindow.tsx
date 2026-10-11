@@ -79,8 +79,8 @@ function SessionView({ s }: { s: DebugSession }) {
   const [tab, setTab] = useState<"debugger" | "console">("debugger");
   const paused = st.status === "paused";
   const statusText =
-    st.status === "starting" ? "Connecting to the debugger…" :
-    st.status === "running" ? "Running" :
+    st.status === "starting" ? (st.stopText ?? "Connecting to the debugger…") :
+    st.status === "running" ? (st.stopText ?? "Running") :
     st.status === "ended" ? (st.exitCode != null ? `Process finished with exit code ${st.exitCode}` : "Finished") :
     st.exception ? `${st.exception.type}${st.exception.message ? ": " + st.exception.message : ""}` :
     st.stopReason === "breakpoint" ? "Paused at breakpoint" : st.stopReason === "step" ? "Paused" : `Paused (${st.stopReason ?? "paused"})`;
@@ -94,6 +94,7 @@ function SessionView({ s }: { s: DebugSession }) {
         <div className="dbg-sep" />
         <Btn icon={I.bps} title="View Breakpoints" action="ViewBreakpoints" onClick={ops.viewBreakpoints} />
         <Btn icon={I.mute} title="Mute Breakpoints" on={muted} onClick={ops.toggleMute} />
+        {s.sideExtras && <s.sideExtras session={s} />}
       </div>
       <div className="dbg-content">
         <div className="dbg-sub">

@@ -17,6 +17,12 @@ function load() {
   try {
     if (k) active = { ...active, ...JSON.parse(localStorage.getItem(k) ?? "{}") };
   } catch {}
+  // A tool window that moved to another side (e.g. Claude: right -> left, grouped with Project) must not render on the old side.
+  for (const side of ["left", "right", "bottom"] as Side[]) {
+    const id = active[side];
+    const tw = id ? getToolWindow(id) : undefined;
+    if (id && tw && tw.side !== side) active[side] = side === "left" ? "project" : null; // sanitize
+  }
   layoutStore.set({ active });
 }
 function persist() {

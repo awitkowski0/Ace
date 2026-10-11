@@ -54,3 +54,6 @@
 .tset-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .tset-foot button, .tset-row button { background: var(--bg-input); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 10px; font: inherit; cursor: pointer; }
 .tset-foot button.primary { background: var(--accent-bg); color: var(--nord6); border-color: var(--accent-bg); }
+
+.term-attn { flex: none; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px; font-size: 10px; line-height: 14px; text-align: center; color: #2e3440; background: var(--nord14); font-weight: 600; }
+.term-attn.question { background: var(--nord12); }

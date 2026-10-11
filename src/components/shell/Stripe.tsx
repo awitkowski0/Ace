@@ -2,7 +2,8 @@ import "./shell.css";
 import { useStore } from "../../lib/store";
 import { layoutStore } from "../../lib/layout";
 import { activeMemberOf, clickGroup, isGroupedFollower } from "./toolGroups";
-import { listToolWindows, subscribeToolWindows, type Side } from "../../toolwindows/registry";
+import { listToolWindows, subscribeToolWindows, toolBadges, type Side } from "../../toolwindows/registry";
+import { liveGroup } from "./toolGroups";
 import { useSyncExternalStore } from "react";
 import { keysFor } from "../../actions/keymap";
 import { formatKeystroke } from "../../actions/keystroke";
@@ -16,9 +17,12 @@ function Btn({ id }: { id: string }) {
   const on = active[tw.side] === id || (!!activeMemberOf(id) && activeMemberOf(id) === active[tw.side]);
   const actionId = tw.actionId ?? `Activate${tw.id.replace(/(^|[-_ ])(\w)/g, (_, __, c: string) => c.toUpperCase())}ToolWindow`;
   const k = keysFor(actionId)[0];
+  const { map } = useStore(toolBadges);
+  const badge = liveGroup(id).map((m) => map[m]).find(Boolean);
   return (
     <button className={"stripe-btn" + (on ? " on" : "")} title={tw.title + (k ? `  ${formatKeystroke(k)}` : "")} onClick={() => clickGroup(id)}>
       {tw.icon}
+      {badge && <span className={"stripe-badge " + (badge.kind ?? "")} title={badge.title} data-badge={id}>{badge.text}</span>}
     </button>
   );
 }

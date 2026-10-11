@@ -1,0 +1,83 @@
+// Ace: dumpClasspath. Registers ONE task (aceDumpClasspath) in the root project; running it prints the compile settings of the
+// source set that contains a given Java file as one JSON line (ACE-CP-JSON:). Read-only: nothing is written, no other task runs.
+// Inputs: -Pace.file=<abs path of the .java file>. Uses lazy registration only (no task is realized at configuration time).
+gradle.rootProject { Project root ->
+  root.tasks.register('aceDumpClasspath') { t ->
+    t.group = 'ace'
+    t.doLast {
+      def file = (root.findProperty('ace.file') ?: '').toString()
+      def target = new File(file).canonicalFile
+      def res = [file: file, ok: false, gradleJavaHome: System.getProperty('java.home'), gradleJava: System.getProperty('java.version')]
+      def paths = { fc -> fc.files.collect { it.absolutePath } }
+      def done = { println 'ACE-CP-JSON:' + groovy.json.JsonOutput.toJson(res) }
+      // candidates: every project with a source set whose java.srcDirs contain the file (a source set may point outside its project dir,
+      // e.g. the root project compiling versions/1.20.1/fabric/src/main/java, and shared source such as src/common/java is compiled by several
+      // projects). -Pace.project=<path> pins one; with several candidates and no pin only their output dirs are reported (cheap) and the
+      // caller chooses by what the running JVM actually uses.
+      def cands = []
+      root.allprojects.each { Project p ->
+        def sc = p.extensions.findByName('sourceSets')
+        if (sc == null) return
+        try {
+          def hit = sc.findAll { ss -> ss.allJava.srcDirs.any { d -> target.toPath().startsWith(d.canonicalFile.toPath()) } }
+          if (!hit.isEmpty()) cands << [project: p, sets: hit]
+        } catch (Throwable ignore) {}
+      }
+      def pin = (root.findProperty('ace.project') ?: '').toString()
+      if (!pin.isEmpty()) cands = cands.findAll { it.project.path == pin }
+      if (cands.isEmpty()) { res.error = 'The file is not in the Java source directories of any project of this build'; done(); return }
+      if (cands.size() > 1) {
+        res.needsChoice = true
+        res.candidates = cands.collect { c -> [project: c.project.path, projectDir: c.project.projectDir.absolutePath, outputDirs: c.sets.collectMany { ss -> paths(ss.output.classesDirs) }] }
+        res.ok = true
+        done(); return
+      }
+      Project best = cands[0].project
+      res.project = best.path
+      res.projectDir = best.projectDir.absolutePath
+      def ssc = best.extensions.findByName('sourceSets')
+      // classpath resolution needs the owning project's lock (we run in the root project's task): Gradle refuses "without an exclusive lock" otherwise
+      def locked = { Closure c ->
+        def owner = null
+        try { owner = best.owner } catch (Throwable ignore) {}
+        if (owner != null && owner.metaClass.respondsTo(owner, 'fromMutableState')) {
+          try { return owner.fromMutableState { c() } } catch (Throwable e) { if (!(e instanceof groovy.lang.MissingMethodException)) throw e }
+        }
+        return c()
+      }
+      def sets = []
+      locked { ssc.each { ss ->
+        def srcDirs = ss.allJava.srcDirs.collect { it.canonicalFile }
+        def containing = srcDirs.find { target.toPath().startsWith(it.toPath()) }
+        def entry = [name: ss.name, srcDirs: srcDirs.collect { it.absolutePath }, contains: containing != null]
+        if (containing != null) {
+          entry.outputDirs = paths(ss.output.classesDirs)
+          def cj = best.tasks.findByName(ss.compileJavaTaskName)
+          if (cj != null) {
+            entry.compileTask = cj.path
+            try { entry.release = cj.options.release.getOrNull() } catch (Throwable ignore) {}
+            entry.sourceCompat = cj.sourceCompatibility
+            entry.targetCompat = cj.targetCompatibility
+            entry.compilerArgs = cj.options.compilerArgs.collect { it.toString() }
+            entry.encoding = cj.options.encoding
+            try { entry.annotationProcessorPath = paths(cj.options.annotationProcessorPath ?: best.files()) } catch (Throwable e) { entry.annotationProcessorPath = [] }
+            try { entry.generatedSourcesDir = cj.options.generatedSourceOutputDirectory.get().asFile.absolutePath } catch (Throwable ignore) {}
+            try { entry.classpath = paths(cj.classpath) } catch (Throwable e) { entry.classpathError = e.toString() }
+          }
+          if (entry.classpath == null) {
+            try { entry.classpath = paths(ss.compileClasspath) } catch (Throwable e) { entry.classpathError = e.toString() }
+          }
+        }
+        sets << entry
+      } }
+      def javaExt = best.extensions.findByName('java')
+      try { res.toolchain = javaExt?.toolchain?.languageVersion?.getOrNull()?.asInt() } catch (Throwable ignore) {}
+      try { res.toolchainVendor = javaExt?.toolchain?.vendor?.getOrNull()?.toString() } catch (Throwable ignore) {}
+      try { res.sourceCompat = javaExt?.sourceCompatibility?.toString(); res.targetCompat = javaExt?.targetCompatibility?.toString() } catch (Throwable ignore) {}
+      res.sourceSets = sets
+      res.ok = sets.any { it.contains }
+      if (!res.ok) res.error = "No source set of ${best.path} contains this file"
+      done()
+    }
+  }
+}

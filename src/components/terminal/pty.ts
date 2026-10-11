@@ -10,6 +10,8 @@ export interface PtySpawnOpts {
   shellIntegration?: boolean;
   /** `<venv>/bin/activate` to source at the first prompt (local interactive shells; set by the Python module's activator). */
   activate?: string;
+  /** Claude notification channel file (see claude/hooks.ts); `claude` started in this terminal then reports Stop/Notification events. */
+  hookFile?: string;
   /** Frontend-chosen id so listeners can be attached before the first byte. */
   id?: string;
 }

@@ -8,7 +8,7 @@ import { projectStore } from "../../../lib/project";
 import type { Location } from "../../../lib/ipc";
 import { showContextMenu } from "../../shell/contextMenu";
 import { watchEditors } from "../glyph";
-import { getRunMarkers, type RunMarker } from "../../run/hooks";
+import { getRunMarkers, isDebugLanguage, type RunMarker } from "../../run/hooks";
 import { pyStore } from "../interpreter";
 import { bpStore, bpsAt, bpsIn, loadBreakpoints, removeBreakpoint, setBreakpointLines, toggleBreakpoint, updateBreakpoint, type Bp } from "./bps";
 import { debugStore } from "./session";
@@ -22,9 +22,10 @@ const STICK_NEVER_GROWS = 1;
 export function modelLoc(m: editor.ITextModel): Location {
   return m.uri.scheme === "ssh" ? { host: m.uri.authority, path: m.uri.path } : { host: "local", path: m.uri.path };
 }
-/** Python files of the project's host. */
+/** Python files (and files of other debuggable languages, e.g. GDScript) of the project's host. */
 export function acceptModel(m: editor.ITextModel): boolean {
-  if (m.getLanguageId() !== "python") return false;
+  const lang = m.getLanguageId();
+  if (lang !== "python" && !isDebugLanguage(lang)) return false;
   const host = projectStore.get().root?.host ?? "local";
   return (m.uri.scheme === "file" || m.uri.scheme === "ssh") && modelLoc(m).host === host;
 }

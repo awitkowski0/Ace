@@ -11,12 +11,14 @@ import { openFile } from "../../editor/store";
 import { confirmDialog } from "../shell/dialogs";
 import { pty } from "./pty";
 import { terminalActivate } from "./activator";
+import { runSpawnHook } from "./spawnHook";
 import { openExternal } from "./external";
 import { base64ToUtf8, clipboardRead, clipboardWrite, isUnsafePaste, utf8ToBase64 } from "./clipboard";
 import { filePathLinks } from "./links";
 import { desktopNotify, qaHooks } from "./notify";
 import { getSettings, settingsStore, type TermSettings } from "./settings";
 import { NORD, resolveTheme } from "./themes";
+import { onSchemeChange } from "../../theme";
 
 export interface PaneSpec { host: string; cwd: string; command?: string; login?: boolean; fontSize?: number }
 interface Block { prompt: IMarker; out?: IMarker; end?: IMarker; endAtCol0?: boolean; exit?: number }
@@ -197,10 +199,15 @@ export class Pane {
         activate = await activate;
         if (this.disposed) return this.unlistenAll();
       }
+      let hookFile: string | undefined;
+      try {
+        hookFile = (await runSpawnHook({ host: this.host, cwd: this.startCwd, command: this.command, id: this.id })) ?? undefined;
+      } catch { /* notifications are optional */ }
+      if (this.disposed) return this.unlistenAll();
       await pty.spawn({
         host: this.host, cwd: this.startCwd, command: this.command, login: this.login,
         cols: this.term.cols, rows: this.term.rows, id: this.id, shellIntegration: getSettings().shellIntegration,
-        activate,
+        activate, hookFile,
       });
     } catch (e) {
       this.exited = true;
@@ -550,4 +557,5 @@ export function watchSettings(forEach: (f: (p: Pane) => void) => void) {
     forEach((p) => p.applySettings(next));
   });
   window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => forEach((p) => void p.applyTheme()));
+  onSchemeChange(() => forEach((p) => void p.applyTheme())); // IDE colour scheme switched: re-theme panes that follow it
 }

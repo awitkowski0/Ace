@@ -6,7 +6,7 @@ import { CloseIcon, ChevronDown } from "../shell/icons";
 import { showContextMenu } from "../shell/contextMenu";
 import { Pane } from "./pane";
 import { SearchBar } from "./SearchBar";
-import { equalizeSplits, closeTab, createSession, getPane, moveTab, newTabInherit, renameTabPrompt, setActive, setLastRoot, setSplitRatio, tabHasBell, tabTitle, takeWantFocus, termStore, undoClose, type Tab } from "./sessions";
+import { equalizeSplits, closeTab, createSession, getPane, moveTab, newTabInherit, renameTabPrompt, setActive, setLastRoot, setSplitRatio, tabDecor, tabHasBell, tabTitle, takeWantFocus, termStore, undoClose, type Tab } from "./sessions";
 import { layoutRects, layoutSplits, leaves, type Rect } from "./splitTree";
 import "./terminal.css";
 
@@ -145,6 +145,7 @@ export function TerminalPanel({ root }: ToolWindowProps) {
             >
               {host !== "local" && <span className="term-badge">{host}</span>}
               {bell && <span className="term-bell" title="Bell" />}
+              {(() => { const b = tabDecor.badge(t); return b ? <span className={"term-attn " + b.kind} title={b.title} data-attn={b.kind}>{b.text}</span> : null; })()}
               <span className="term-title">{tabTitle(t)}</span>
               {p?.exited && <span className="term-exited">(exited)</span>}
               {leaves(t.root).length > 1 && <span className="term-count">{leaves(t.root).length}</span>}

@@ -33,6 +33,7 @@ tauri-plugin-opener = "2.7.0"
 tauri-plugin-single-instance = "2.5.2"
 tauri-plugin-notification = "2.5.1"
 ureq = "2"
+symphonia = { version = "0.6.1", features = ["aiff", "mp3"] }
 
 [profile.release]
 lto = true

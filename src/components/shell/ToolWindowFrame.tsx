@@ -3,20 +3,22 @@ import type { ToolWindowDef } from "../../toolwindows/registry";
 import type { Location } from "../../lib/ipc";
 import { DotsIcon, MinusIcon } from "./icons";
 import { showContextMenu } from "./contextMenu";
-import { getToolWindow } from "../../toolwindows/registry";
+import { getToolWindow, toolBadges } from "../../toolwindows/registry";
+import { useStore } from "../../lib/store";
 import { liveGroup, selectGroupTab } from "./toolGroups";
 
 export function ToolWindowFrame({ tw, root }: { tw: ToolWindowDef; root: Location }) {
   const C = tw.component;
   const H = tw.headerActions;
   const group = liveGroup(tw.id);
+  const { map: badges } = useStore(toolBadges);
   return (
     <div className="toolwindow" data-toolwindow={tw.id} tabIndex={-1}>
       <div className="tw-header">
         {group.length > 1 ? (
           <div className="tw-tabs">
             {group.map((m) => (
-              <span key={m} className={"tw-tab" + (m === tw.id ? " active" : "")} onMouseDown={() => m !== tw.id && selectGroupTab(m)}>{getToolWindow(m)?.title}</span>
+              <span key={m} className={"tw-tab" + (m === tw.id ? " active" : "")} onMouseDown={() => m !== tw.id && selectGroupTab(m)}>{getToolWindow(m)?.title}{badges[m] && <span className={"tw-badge " + (badges[m]!.kind ?? "")} title={badges[m]!.title} data-badge={m}>{badges[m]!.text}</span>}</span>
             ))}
           </div>
         ) : (

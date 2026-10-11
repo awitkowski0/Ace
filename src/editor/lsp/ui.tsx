@@ -8,6 +8,7 @@ import { activeEditor } from "../editorRegistry";
 import { PopupShell, type PopupProps } from "../../components/shell/popups";
 import { showToolWindow } from "../../lib/layout";
 import { showContextMenu } from "../../components/shell/contextMenu";
+import { runProblems } from "../../components/run/problems";
 import { diagStore, godotPaused, lspSettings, setAutoGodot, statusStore, usagesStore, type Diag } from "./state";
 import { activeDoc, activeServerId, lsp } from "./api";
 import { openAt } from "./navigate";
@@ -26,13 +27,13 @@ export function SevIcon({ sev }: { sev: 1 | 2 | 3 | 4 }) {
 
 const relPath = (p: string, root?: string) => (root && p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
 
-interface Row { kind: "file" | "item"; path: string; text: string; sub?: string; sev?: 1 | 2 | 3 | 4; range?: Diag["range"]; count?: number }
+interface Row { kind: "file" | "item"; path: string; title?: string; text: string; sub?: string; sev?: 1 | 2 | 3 | 4; range?: Diag["range"]; count?: number }
 
 function List({ rows, empty }: { rows: Row[]; empty: string }) {
   const [sel, setSel] = useState(-1);
   const ref = useRef<HTMLDivElement>(null);
   const items = rows.map((r, i) => (r.kind === "item" ? i : -1)).filter((i) => i >= 0);
-  const go = (r: Row) => openAt(r.path, r.range);
+  const go = (r: Row) => { if (r.path) void openAt(r.path, r.range); };
   if (!rows.length) return <div className="lsp-empty" tabIndex={0} data-autofocus>{empty}</div>;
   return (
     <div
@@ -49,7 +50,7 @@ function List({ rows, empty }: { rows: Row[]; empty: string }) {
     >
       {rows.map((r, i) =>
         r.kind === "file" ? (
-          <div key={i} className="lsp-file"><span>{basename(r.path)}</span><span className="dim">{r.sub}</span><span className="dim">{r.count}</span></div>
+          <div key={i} className="lsp-file"><span>{r.title ?? basename(r.path)}</span><span className="dim">{r.sub}</span><span className="dim">{r.count}</span></div>
         ) : (
           <div key={i} data-i={i} className={"lsp-row" + (i === sel ? " selected" : "")} onClick={() => { setSel(i); go(r); }}>
             {r.sev && <SevIcon sev={r.sev} />}
@@ -77,24 +78,38 @@ export function ProblemsPanel() {
   useStore(editorStore);
   const sid = activeServerId();
   const sst = sid ? servers[sid] : undefined;
-  const [tab, setTab] = useState<"file" | "project">("file");
+  const [tab, setTab] = useState<"file" | "project" | "run">("file");
+  const { runs } = useStore(runProblems);
+  const runTotal = runs.reduce((n, r) => n + r.items.length, 0);
   const cur = activeDoc()?.loc.path;
   // hint-level results (grey "unnecessary code" fading) only decorate the editor; they are not problems
   const shown = (l: Diag[]) => l.filter((d) => d.severity <= 3);
   const curDiags = cur ? shown(byUri[cur] ?? []) : [];
   const total = useMemo(() => Object.values(byUri).reduce((n, l) => n + shown(l).length, 0), [byUri]);
   const rows = useMemo<Row[]>(() => {
+    // errors and warnings parsed from run output (Godot), grouped by run
+    if (tab === "run") {
+      return [...runs].reverse().filter((r) => r.items.length).flatMap((r) => [
+        { kind: "file", path: r.name, title: r.name, text: "", sub: "", count: r.items.length } as Row,
+        ...r.items.map((p): Row => ({
+          kind: "item", path: p.path ?? "", text: p.message.split("\n")[0], sev: p.sev,
+          range: p.path ? { start: { line: p.line - 1, character: p.col - 1 }, end: { line: p.line - 1, character: p.col - 1 } } : undefined,
+          sub: p.path ? `${basename(p.path)}:${p.line}${p.detail ? "  " + p.detail : ""}` : p.detail,
+        })),
+      ]);
+    }
     if (tab === "file") return [...curDiags].sort(sortDiags).map(diagRow);
     return Object.entries(byUri).map(([p, l]) => [p, shown(l)] as const).filter(([, l]) => l.length).sort(([a], [b]) => a.localeCompare(b)).flatMap(([p, l]) => [
       { kind: "file", path: p, text: "", sub: relPath(p, root?.path), count: l.length } as Row,
       ...[...l].sort(sortDiags).map(diagRow),
     ]);
-  }, [tab, byUri, cur, root]);
+  }, [tab, byUri, cur, root, runs]);
   return (
     <div className="lsp-panel">
       <div className="lsp-tabs">
         <span className={"lsp-tab" + (tab === "file" ? " active" : "")} onClick={() => setTab("file")}>Current File {curDiags.length || ""}</span>
         <span className={"lsp-tab" + (tab === "project" ? " active" : "")} onClick={() => setTab("project")}>Project Errors {total || ""}</span>
+        {(runTotal > 0 || tab === "run") && <span className={"lsp-tab" + (tab === "run" ? " active" : "")} data-testid="problems-run-tab" onClick={() => setTab("run")}>Run {runTotal || ""}</span>}
       </div>
       {sst?.state === "unavailable" && sst.action && (
         <div className="lsp-notice" data-testid="lsp-install-notice">
@@ -103,7 +118,7 @@ export function ProblemsPanel() {
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0 }}>
-        <List rows={rows} empty={tab === "file" ? "No problems found in the current file" : "No problems reported by language servers"} />
+        <List rows={rows} empty={tab === "file" ? "No problems found in the current file" : tab === "run" ? "No errors or warnings in run output" : "No problems reported by language servers"} />
       </div>
     </div>
   );

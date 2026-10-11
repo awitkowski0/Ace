@@ -2,6 +2,7 @@
 import type { editor } from "monaco-editor";
 import { onEditorRegistered } from "../../editor/editorRegistry";
 import { pyStore } from "./interpreter";
+import { debugLanguages, subscribeDebugLanguages } from "../run/hooks";
 
 export type EditorHook = (ed: editor.IStandaloneCodeEditor, model: editor.ITextModel) => void | (() => void);
 
@@ -35,7 +36,8 @@ export const isPythonModel = (m: editor.ITextModel) => m.getLanguageId() === "py
 
 function ensureGlyph(ed: editor.IStandaloneCodeEditor) {
   let on = false;
-  const apply = () => { if (!on && pyStore.get().active) { on = true; ed.updateOptions({ glyphMargin: true }); } };
+  const apply = () => { if (!on && (pyStore.get().active || debugLanguages().length)) { on = true; ed.updateOptions({ glyphMargin: true }); } };
   apply();
   pyStore.subscribe(apply);
+  subscribeDebugLanguages(apply);
 }

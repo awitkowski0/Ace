@@ -1,10 +1,17 @@
 mod automation;
 mod claude;
+mod claude_hooks;
 mod daemons;
 mod dap;
 mod fs;
 mod git;
+mod godot;
+mod gradle;
+mod hotswap;
+mod jdwp;
+mod jdwp_dbg;
 mod location;
+mod media;
 mod lsp;
 mod menu;
 mod procs;
@@ -15,6 +22,7 @@ mod remote;
 mod runner;
 mod search;
 mod termext;
+mod uiprefs;
 mod windows;
 
 pub use location::Location;
@@ -63,6 +71,10 @@ pub fn run() {
             fs::fs_delete,
             fs::fs_create_dir,
             fs::fs_home,
+            fs::bytes::fs_read_bytes,
+            fs::bytes::fs_probe,
+            media::audio_decode_wav,
+            media::audio_info,
             location::launch_location,
             fs::watch::fs_watch,
             fs::watch::fs_unwatch,
@@ -136,6 +148,13 @@ pub fn run() {
             claude::claude_watch,
             claude::claude_unwatch,
             claude::claude_reveal,
+            claude_hooks::claude_hook_channel,
+            claude_hooks::claude_turn_info,
+            claude_hooks::claude_fallback_set,
+            claude_hooks::claude_follow,
+            claude_hooks::claude_unfollow,
+            claude_hooks::claude_note_shown,
+            claude_hooks::claude_note_claim,
             // == remote ==
             remote::ssh::remote_hosts,
             remote::extras::remote_list_dir,
@@ -159,6 +178,34 @@ pub fn run() {
             daemons::daemons_cleanup_scan,
             daemons::daemons_cleanup_cancel,
             daemons::daemons_cleanup_run,
+            // == uiprefs == (global colour scheme)
+            uiprefs::ui_pref_get,
+            uiprefs::ui_pref_set,
+            // == gradle ==
+            gradle::gradle_fingerprint,
+            gradle::gradle_discover,
+            gradle::gradle_cancel,
+            gradle::gradle_soft_stop,
+            hotswap::hotswap_jdks,
+            hotswap::gradle_debug_prepare,
+            hotswap::gradle_debug_cleanup,
+            hotswap::hotswap_run,
+            hotswap::hotswap_dump,
+            hotswap::hotswap_forget,
+            jdwp::jdwp_free_port,
+            jdwp::jdwp_attach,
+            jdwp::jdwp_detach,
+            jdwp::jdwp_kill_game,
+            jdwp::jdwp_info,
+            jdwp::jdwp_events,
+            jdwp_dbg::jdwp_breakpoints,
+            jdwp_dbg::jdwp_threads,
+            jdwp_dbg::jdwp_stack,
+            jdwp_dbg::jdwp_scopes,
+            jdwp_dbg::jdwp_variables,
+            jdwp_dbg::jdwp_resume,
+            jdwp_dbg::jdwp_suspend,
+            jdwp_dbg::jdwp_step,
             // == python == (run configs, interpreters, debugger, packages: docs/PYTHON.md)
             pstore::pstore_get,
             pstore::pstore_set,
@@ -182,6 +229,15 @@ pub fn run() {
             python::py_scripts_dir,
             python::py_script_source,
             python::py_filter,
+            // == godot == (docs/GODOT.md)
+            godot::godot_find,
+            godot::godot_scan,
+            godot::godot_scenes_using,
+            godot::godot_changed_scripts,
+            godot::godot_dbg_listen,
+            godot::godot_dbg_send,
+            godot::godot_dbg_close,
+            godot::godot_open_editor,
         ])
         .build(context)
         .expect("error while building Atelier")

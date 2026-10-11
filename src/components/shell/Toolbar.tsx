@@ -30,7 +30,7 @@ export function Toolbar() {
         <RunWidget />
       </div>
       <button className="icon-btn" title={`Search Everywhere${key ? " " + formatKeystroke(key) : ""}`} onClick={() => runAction("SearchEverywhere")}><SearchIcon /></button>
-      <button className="icon-btn" title="Settings"><GearIcon /></button>
+      <button className="icon-btn" title="Settings" onClick={() => runAction("ShowSettings")}><GearIcon /></button>
     </div>
   );
 }

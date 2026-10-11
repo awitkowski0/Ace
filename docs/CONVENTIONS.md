@@ -53,6 +53,7 @@ Several agents work in this tree at the same time. Stay inside the files you own
   for remote hosts it is run via `login_wrap` so `claude` resolves on mc.
 - Terminal internals (splits, tabs, shell integration, Ghostty parity, key table): `docs/TERMINAL.md`. Terminal actions use `context: {toolWindow: "terminal"}`; test hooks for the
   automation harness are `await __qa.term()` (`src/components/terminal/qa.ts`), suite `scripts/qa/terminal.mjs`. The harness uses a private NSPasteboard (`ATELIER_AUTOMATION`).
+- Claude sessions / notifications (flip ⌃⌥A, hook channel, transcript fallback): `docs/AI-SESSIONS.md`; test hooks `await __qa.ai()`, suite `scripts/qa/ai.mjs`. `setSpawnHook` (`terminal/spawnHook.ts`) lets a module add a `hookFile` to pty spawns; `tabDecor.badge` (terminal/sessions.ts) and `setToolBadge` (toolwindows/registry.ts) draw tab / stripe badges.
 - Remote fs (owned by remote agent): `fs.*` commands work for any `Location` whose host is an ssh alias.
 
 ## Automation harness (for testing — NEVER drive the real keyboard)
@@ -83,3 +84,14 @@ Instead (being built by the harness agent; contract fixed here):
   (`procs::kill_owner`); plain `register*` = owner "app" (killed on quit only). Shared resources (fs watcher, search index, Godot per root, ssh master, claude
   watcher) keep a set of window labels and expose `release_window(label)`, which `windows::cleanup_window` calls on close.
 - No menu accelerators for keys owned by the JS keymap (they would be consumed by AppKit before the webview). Window state/session: `src-tauri/src/windows.rs`.
+
+## Repo config: `.ace/config.json`
+Shared, repo-scoped settings (committed to git by the team) live in ONE file at the project root: `.ace/config.json` (local or remote). Everything else
+Ace stores per project stays in the app data dir (`pstore`), never in the repo. Module: `src/lib/repoConfig.ts`.
+- Schema: `{ "version": 1, "<section>": { ... } }`, one top-level section per feature (`gradle` today). Unknown keys/sections are kept.
+- API: `ensureRepoConfig()` once (non-render code; starts the watcher + first read), then `repoSection<T>("key")` → `{get, set, subscribe}` or
+  `useRepoSection<T>("key")` in React; `setRepoSection(key, value)` is a read-modify-write of the whole file (an edit made by git/an editor
+  meanwhile is not lost), pretty-printed (2 spaces), `version` first, other keys in their existing order, trailing newline, so diffs stay clean.
+- The file/dir is only created on the first write. A file that is not valid JSON is never overwritten (the error is in `repoConfigStore`).
+- External edits (pull, editor) reload automatically through the existing fs watcher; our own writes do not echo.
+- Never write other files into the project. Sections in use: `gradle.pinned`, `hotswap.onSave` (docs/GRADLE.md).

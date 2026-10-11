@@ -5,7 +5,8 @@ const BY_EXT: Record<string, string> = {
   bash: "shell", zsh: "shell", yaml: "yaml", yml: "yaml", xml: "xml", sql: "sql", c: "c", h: "c", cpp: "cpp", hpp: "cpp",
   cs: "csharp", rb: "ruby", php: "php", swift: "swift", lua: "lua", gradle: "groovy", toml: "ini", properties: "ini",
   // Godot
-  gd: "gdscript", tscn: "ini", tres: "ini", godot: "ini", cfg: "ini", import: "ini", gdshader: "c",
+  gd: "gdscript", tscn: "ini", tres: "ini", godot: "ini", cfg: "ini", import: "ini", gdshader: "glsl", gdshaderinc: "glsl", glsl: "glsl", fsh: "glsl", vsh: "glsl", frag: "glsl", vert: "glsl", snbt: "snbt",
+  mcmeta: "json", bbmodel: "json", pose: "json", mcfunction: "plaintext", lang: "ini", svg: "xml", csv: "plaintext", tsv: "plaintext",
 };
 const BY_NAME: Record<string, string> = { Dockerfile: "dockerfile", Makefile: "makefile", "project.godot": "ini" };
 

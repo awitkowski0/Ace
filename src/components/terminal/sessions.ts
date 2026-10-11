@@ -75,6 +75,18 @@ export function tabTitle(t: Tab): string {
   const p = panes.get(t.focus);
   return p?.title || p?.defaultTitle || "Terminal";
 }
+/** Re-render subscribers (tab badges that live outside this model, e.g. Claude's "waiting" dots). */
+export const bumpTerm = bump;
+/** Late-bound by the Claude module: badge shown on a terminal tab (null = none). */
+export const tabDecor: { badge: (t: Tab) => { text: string; title: string; kind: string } | null } = { badge: () => null };
+/** Is this pane's terminal on screen right now (tool window showing, its tab active, split not hidden by zoom)? */
+export function paneVisible(id: string): boolean {
+  const p = panes.get(id);
+  const t = tabOf(id);
+  if (!p || !t || termStore.get().active !== t.id) return false;
+  if (t.zoom && t.zoom !== id) return false;
+  return p.el.isConnected && !!p.el.closest('.toolwindow[data-toolwindow="terminal"]');
+}
 export const tabHasBell = (t: Tab) => leaves(t.root).some((id) => panes.get(id)?.bell);
 
 // ------------------------------------------------------------------ tabs

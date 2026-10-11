@@ -3,6 +3,7 @@ import type { ITheme } from "@xterm/xterm";
 import { invoke } from "../../lib/ipc";
 import { DEFAULT_THEME, type TermSettings } from "./settings";
 import { colorOverridesFrom, parseConfigText, resolveThemeName } from "./ghosttyConfig";
+import { terminalTheme } from "../../theme";
 
 export const NORD: ITheme = {
   background: "#2e3440", foreground: "#d8dee9", cursor: "#d8dee9", cursorAccent: "#2e3440",
@@ -36,7 +37,7 @@ export function parseThemeText(text: string): ITheme {
 
 const cache = new Map<string, ITheme>();
 export async function loadTheme(name: string): Promise<ITheme | null> {
-  if (name === DEFAULT_THEME) return NORD;
+  if (name === DEFAULT_THEME) return terminalTheme() as ITheme; // follows the IDE colour scheme (Nord by default)
   const hit = cache.get(name);
   if (hit) return hit;
   try {
@@ -58,6 +59,6 @@ export const prefersDark = () => !window.matchMedia || window.matchMedia("(prefe
 
 /** Effective xterm theme for the settings: theme (light/dark pair resolved) + config color overrides. */
 export async function resolveTheme(s: Pick<TermSettings, "theme" | "colorOverrides">): Promise<ITheme> {
-  const base = (await loadTheme(resolveThemeName(s.theme, prefersDark()))) ?? NORD;
+  const base = (await loadTheme(resolveThemeName(s.theme, prefersDark()))) ?? (terminalTheme() as ITheme);
   return Object.keys(s.colorOverrides).length ? themeFromColors(s.colorOverrides, base) : base;
 }

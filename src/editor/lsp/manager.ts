@@ -14,6 +14,8 @@ import { LANGUAGE_ID_FOR, ROOT_MARKERS, SERVER_FOR_LANGUAGE, intentionProviderLi
 import { DIAG_OWNERS, diagStore, getSourceDiags, lspSettings, pathToUri, setServerStatus, setSourceDiags, uriToPath, usagesStore, type Diag } from "./state";
 import { openAt } from "./navigate";
 import { applyWorkspaceEdit } from "./edits";
+import { decodeAce, remapSemanticTokens, type ServerLegend } from "./semantic";
+import { SEM_LEGEND_TYPES } from "../../theme/semanticRoles";
 
 type Model = monaco.editor.ITextModel;
 const IDLE_MS = 10 * 60 * 1000;
@@ -123,7 +125,7 @@ async function track(model: Model) {
   ctx.models.add(model);
   clearTimeout(ctx.idle);
   applyMarkers(model);
-  if (ctx.client) sendOpen(ctx, model, t);
+  if (ctx.client) { sendOpen(ctx, model, t); if (ctx.client.caps.semanticTokensProvider) setTimeout(() => semChanged.fire(), 50); }
   else startServer(ctx);
 }
 
@@ -222,6 +224,7 @@ async function startServer(ctx: Ctx) {
     setServerStatus(ctx.statusId, { state: "ready" });
     if (ctx.serverId === "typescript") disableBuiltinTs();
     for (const m of ctx.models) { const t = tracked.get(m); if (t && !t.sent) sendOpen(ctx, m, t); }
+    if (client.caps.semanticTokensProvider) setTimeout(() => semChanged.fire(), 50); // didOpen is queued: colour the open files once the server has them
   } catch (e) {
     client?.stop();
     ctx.client = undefined;
@@ -250,6 +253,7 @@ export function retryNow() {
 function wire(ctx: Ctx, c: LspClient) {
   c.onNotification("textDocument/publishDiagnostics", (p) => publish(ctx, p));
   c.onRequest("workspace/configuration", (p) => (p.items ?? []).map((it: Json) => (ctx.launch?.settings ? (ctx.launch.settings(it.section, it.scopeUri) ?? null) : null)));
+  c.onRequest("workspace/semanticTokens/refresh", () => { semChanged.fire(); return null; });
   c.onRequest("client/registerCapability", () => null);
   c.onRequest("client/unregisterCapability", () => null);
   c.onRequest("window/workDoneProgress/create", () => null);
@@ -392,8 +396,44 @@ async function resolveItem(item: Item): Promise<Item> {
   return item;
 }
 
+// ---------- semantic tokens ----------
+const semChanged = new monaco.Emitter<void>();
+const semCache = new WeakMap<Model, { version: number; data: Uint32Array }>();
+/** Monaco asks for every model it holds; only answer for models shown in an editor (hidden tabs cost nothing). */
+const isShown = (m: Model) => monaco.editor.getEditors().some((e) => e.getModel() === m);
+async function semanticTokensFor(model: Model, cancel?: monaco.CancellationToken): Promise<Uint32Array | null> {
+  const c = clientFor(model);
+  const legend: ServerLegend | undefined = c?.caps.semanticTokensProvider?.legend;
+  const full = c?.caps.semanticTokensProvider?.full;
+  if (!c || !legend || !full) return null;
+  const hit = semCache.get(model);
+  if (hit && hit.version === model.getVersionId()) return hit.data;
+  const version = model.getVersionId();
+  let r: Json;
+  try { r = await c.request<Json>("textDocument/semanticTokens/full", { textDocument: tdoc(model) }, 30000, cancel); } catch { return null; }
+  if (!r?.data || model.isDisposed() || model.getVersionId() !== version) return null;
+  const data = remapSemanticTokens(r.data, legend, {
+    text: (line, start, len) => (line < model.getLineCount() ? model.getLineContent(line + 1).substr(start, len) : ""),
+  });
+  semCache.set(model, { version, data });
+  return data;
+}
+function registerSemanticTokens(lang: string) {
+  monaco.languages.registerDocumentSemanticTokensProvider(lang, {
+    onDidChange: semChanged.event,
+    getLegend: () => ({ tokenTypes: SEM_LEGEND_TYPES, tokenModifiers: [] }),
+    async provideDocumentSemanticTokens(model, _lastResultId, token) {
+      if (!isShown(model)) return null;
+      const data = await semanticTokensFor(model, token);
+      return data ? { data } : null;
+    },
+    releaseDocumentSemanticTokens() {},
+  });
+}
+
 function registerProviders(lang: string) {
   const L = monaco.languages;
+  registerSemanticTokens(lang);
   L.registerHoverProvider(lang, { provideHover: (model, pos) => hoverAt(model, pos) });
   L.registerCompletionItemProvider(lang, {
     triggerCharacters: [".", ":", "$", "@", '"', "'", "/", "<", "#", ">"],
@@ -602,6 +642,8 @@ export function boot() {
       return true;
     },
   });
+  monaco.editor.onDidCreateEditor((ed) => { ed.onDidChangeModel(() => semChanged.fire()); });
+  monaco.editor.getEditors().forEach((ed) => { ed.onDidChangeModel(() => semChanged.fire()); });
   monaco.editor.getModels().forEach(track);
   monaco.editor.onDidCreateModel(track);
   monaco.editor.onWillDisposeModel(untrack);
@@ -635,6 +677,14 @@ export async function formatViaLsp(model: Model): Promise<{ range: monaco.IRange
 /** Test hooks (python/lang/qa): the same code paths the Monaco providers use. */
 const modelAt = (path: string) => { const m = monaco.editor.getModel(monaco.Uri.file(path)); if (!m) throw new Error("model not open: " + path); return m; };
 export const qaHooks = {
+  /** semantic tokens as the provider would deliver them (Ace legend), plus whether the server offers them at all */
+  async semantic(path: string) {
+    const m = modelAt(path);
+    const c = clientFor(m);
+    const data = await semanticTokensFor(m);
+    return { supported: !!c?.caps.semanticTokensProvider, legendTypes: c?.caps.semanticTokensProvider?.legend?.tokenTypes ?? [], tokens: data ? decodeAce(data).map((t) => ({ ...t, text: m.getLineContent(t.line + 1).substr(t.start, t.len) })) : null };
+  },
+  caps: (path: string) => { const c = clientFor(modelAt(path)); return c ? { semanticTokensProvider: c.caps.semanticTokensProvider ?? null, name: Object.keys(c.caps) } : null; },
   sessions: () => [...ctxs.values()].map((c) => ({ key: c.key, serverId: c.serverId, bin: c.launch?.bin ?? null, ready: !!c.client, models: c.models.size })),
   async completion(path: string, line: number, col: number, trigger?: string) {
     const r = await completionAt(modelAt(path), { lineNumber: line, column: col }, { triggerKind: trigger ? 1 : 0, triggerCharacter: trigger });

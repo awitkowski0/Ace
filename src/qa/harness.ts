@@ -94,9 +94,10 @@ async function type(text: string) {
   throw new Error(`type(): focused element not typeable (${ae?.tagName})`);
 }
 
-async function openFileQa(path: string) {
-  await openFile(local(path));
-  await waitFor(() => activeEditor()?.getModel(), 8000);
+async function openFileQa(path: string, host = "local") {
+  await openFile(host === "local" ? local(path) : { host, path });
+  // viewer tabs (images, audio, ...) have no Monaco model: the doc itself is the "ready" signal
+  await waitFor(() => { const e = editorStore.get(); const d = e.docs[e.groups[e.activeGroup]?.active ?? ""]; return d?.viewer || d?.error || activeEditor()?.getModel(); }, 8000);
 }
 
 /** Open file and measure until the editor shows its content and a frame was presented. */
@@ -215,6 +216,21 @@ export function installQaHarness() {
     term: async () => (await import("../components/terminal/qa")).termQa,
     /** Python test hooks (scripts/qa/python.mjs): { interp, run, debug, console, tests, packages, lsp, ... } */
     py: async () => (await import("../components/python/qa")).pyQa(),
+    /** Gradle test hooks (scripts/qa/gradle.mjs) */
+    gradle: async () => (await import("../components/gradle/qa")).gradleQa,
+    /** Godot test hooks (scripts/qa/godot.mjs) */
+    godot: async () => (await import("../components/godot/qa")).godotQa,
+    /** AI sessions (flip, hook channel, notifications) test hooks (scripts/qa/ai.mjs) */
+    ai: async () => (await import("../components/claude/qa")).aiQa,
+    /** file viewers (scripts/qa/assets.mjs): `viewer()` = snapshot of the active group's viewer; `viewer("pick", x, y)` calls a controller method */
+    viewer: async (cmd?: string, ...args: unknown[]) => {
+      const { controllerFor } = await import("../editor/viewers/controllers");
+      const ctl = controllerFor(editorStore.get().activeGroup) as Record<string, any> | undefined;
+      if (!ctl) return null;
+      return cmd ? await ctl[cmd]?.(...args) : ctl.snapshot?.();
+    },
+    /** colour scheme test hooks (scripts/qa/themes.mjs) */
+    themes: async () => (await import("../theme/qa")).themeQa,
     version: 2,
   };
 }

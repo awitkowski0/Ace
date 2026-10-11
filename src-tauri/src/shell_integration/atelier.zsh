@@ -31,6 +31,15 @@ if [[ -o interactive && -n "$ATELIER_SHELL_INTEGRATION" && -z "$__atelier_loaded
       [[ -r "$ATELIER_ACTIVATE" ]] && builtin source "$ATELIER_ACTIVATE" >/dev/null 2>&1
       unset ATELIER_ACTIVATE
     fi
+    # Claude notifications: inside Ace shells `claude` starts with Ace's Stop/Notification hooks (--settings is additive to the user's
+    # own settings; nothing on disk is changed). Not defined when the user has their own claude alias/function.
+    if [[ -n "$ATELIER_HOOK_FILE" && -n "$ATELIER_CLAUDE_SETTINGS" ]] && (( ! ${+aliases[claude]} && ! ${+functions[claude]} )); then
+      function claude {
+        case "${1-}" in agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) command claude "$@"; return;; esac
+        local a; for a in "$@"; do case "$a" in -p|--print|-h|--help|-v|--version|--bg) command claude "$@"; return;; esac; done
+        command "${ATELIER_CLAUDE_BIN:-claude}" --settings "$ATELIER_CLAUDE_SETTINGS" "$@"
+      }
+    fi
     precmd_functions=(${precmd_functions:#__atelier_init})
     autoload -Uz add-zsh-hook
     add-zsh-hook precmd __atelier_precmd

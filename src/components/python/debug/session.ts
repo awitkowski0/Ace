@@ -3,10 +3,10 @@ import { createStore, type Store } from "../../../lib/store";
 import { openFile } from "../../../editor/store";
 import { runner, type RunSpec } from "../api";
 import { envFor } from "../interpreter";
-import type { PythonDebugTarget } from "../../run/hooks";
+import type { DebugTarget } from "../../run/hooks";
 import type { AdapterChoice } from "./adapter";
 import { bpStore, watchStore } from "./bps";
-import { DapClient, type DapBody } from "./dap";
+import { DapClient, type DapBody, type DapLike } from "./dap";
 import { dapBreakpoints, dapExceptionFilters, exitText, PAGE, type LocalVal } from "./pure";
 
 export type Status = "starting" | "running" | "paused" | "ended";
@@ -69,7 +69,7 @@ const errText = (e: unknown) => {
 export class DebugSession {
   readonly id = `dbg${sessionSeq++}`;
   readonly store: Store<SessionState>;
-  client!: DapClient;
+  client!: DapLike;
   caps: DapBody = {};
   /** output chunks for the Console tab (state.outRev changes when it grows) */
   readonly out: OutChunk[] = [];
@@ -81,7 +81,7 @@ export class DebugSession {
   private finished = false;
   private stopping = false;
   private configured = false;
-  private stopGen = 0;
+  protected stopGen = 0;
   private lastSent = new Map<string, string>();
   private lastExc = "";
   private syncing: Promise<void> = Promise.resolve();
@@ -90,18 +90,22 @@ export class DebugSession {
   private finishTimer: ReturnType<typeof setTimeout> | undefined;
   private waiters = new Set<() => void>();
 
-  constructor(readonly target: PythonDebugTarget, readonly adapter: AdapterChoice) {
+  constructor(readonly target: DebugTarget, readonly adapter: AdapterChoice) {
     this.store = createStore<SessionState>({
       id: this.id, title: target.title, status: "starting", exitCode: null, stopReason: null, stopText: null, exception: null,
       threads: [], threadId: null, frames: [], frameIdx: 0, scopes: [], vars: {}, watchResults: {}, bpStatus: {}, outRev: 0, runningTo: false,
     });
   }
 
+  /** Sessions of other languages (Gradle/JDWP: gradle/java) plug in here: Rerun and extra buttons in the Debug window's toolbar */
+  customRerun?: () => Promise<unknown>;
+  sideExtras?: import("react").ComponentType<{ session: DebugSession }>;
+
   get state() { return this.store.get(); }
   get status() { return this.store.get().status; }
   get live() { return this.status !== "ended"; }
   get frame(): Frame | null { const s = this.state; return s.frames[s.frameIdx] ?? null; }
-  private set(p: Partial<SessionState>) { this.store.set(p); this.waiters.forEach((w) => w()); }
+  protected set(p: Partial<SessionState>) { this.store.set(p); this.waiters.forEach((w) => w()); }
 
   /** resolves once `pred(state)` holds (or after `ms`, resolving false) */
   waitFor(pred: (s: SessionState) => boolean, ms = 15000): Promise<boolean> {
@@ -125,7 +129,7 @@ export class DebugSession {
     this.set({ outRev: this.state.outRev + 1 });
   }
   outputText() { return this.out.map((c) => c.d).join(""); }
-  private printLine(s: OutChunk["s"], d: string) {
+  protected printLine(s: OutChunk["s"], d: string) {
     const last = this.out[this.out.length - 1];
     this.print(s, (last && !last.d.endsWith("\n") ? "\n" : "") + d + "\n");
   }
@@ -133,21 +137,23 @@ export class DebugSession {
   // ------------------------------------------------------------------ lifecycle
   async start() {
     const t = this.target;
-    this.client = new DapClient();
+    this.client = t.kind === "godot" ? new (await import("../../godot/dapShim")).GodotDapClient(t) : new DapClient();
     this.client.onEvent = (e, b) => this.onEvent(e, b);
     this.client.onRequest = (c, a) => this.onReverse(c, a);
     this.client.onClosed = () => this.onAdapterClosed();
     this.unsub.push(bpStore.subscribe(() => this.scheduleSync()));
-    const e = envFor(this.adapter.interp);
-    const spec: RunSpec = { host: t.host, cwd: "/", argv: [this.adapter.python, "-m", "debugpy.adapter"], env: { PYTHONUNBUFFERED: "1" }, pathPrepend: e.pathPrepend };
     try {
-      await this.client.start(spec);
+      if (t.kind === "godot") await this.client.start();
+      else {
+        const e = envFor(this.adapter.interp);
+        await this.client.start({ host: t.host, cwd: "/", argv: [this.adapter.python, "-m", "debugpy.adapter"], env: { PYTHONUNBUFFERED: "1" }, pathPrepend: e.pathPrepend });
+      }
       this.caps = await this.client.request("initialize", {
         clientID: "ace", clientName: "Ace", adapterID: "python", locale: "en", linesStartAt1: true, columnsStartAt1: true, pathFormat: "path",
         supportsVariableType: true, supportsVariablePaging: true, supportsRunInTerminalRequest: true, supportsMemoryReferences: false,
         supportsProgressReporting: false, supportsInvalidatedEvent: false,
       });
-      const launch: DapBody = {
+      const launch: DapBody = t.kind === "godot" ? { type: "godot", request: "launch", name: t.title, cwd: t.cwd } : {
         type: "python", request: "launch", name: t.title, cwd: t.cwd, args: t.args, env: t.env, python: [t.python],
         console: "integratedTerminal", justMyCode: true, stopOnEntry: false, showReturnValue: true, redirectOutput: false, subProcess: true,
         ...(t.program ? { program: t.program } : { module: t.module }),
@@ -227,8 +233,10 @@ export class DebugSession {
     const env: Record<string, string> = { ...t.env };
     for (const [k, v] of Object.entries((args.env ?? {}) as Record<string, string | null>)) { if (v === null) delete env[k]; else env[k] = v; }
     // PyCharm puts the project (content) root on PYTHONPATH so `import app.x` works from scripts in sub-folders
-    const pp = (env.PYTHONPATH ?? "").split(":").filter(Boolean);
-    if (!pp.includes(t.cwd)) env.PYTHONPATH = [t.cwd, ...pp].join(":");
+    if (t.kind === "python") {
+      const pp = (env.PYTHONPATH ?? "").split(":").filter(Boolean);
+      if (!pp.includes(t.cwd)) env.PYTHONPATH = [t.cwd, ...pp].join(":");
+    }
     const spec: RunSpec = { host: t.host, cwd: (args.cwd as string) || t.cwd, argv: args.args as string[], env, pathPrepend: t.pathPrepend };
     this.debuggee = await runner.start(spec, {
       kind: "debuggee", label: t.title,
@@ -299,7 +307,8 @@ export class DebugSession {
     const { list, muted } = bpStore.get();
     const want = new Map<string, ReturnType<typeof dapBreakpoints>>();
     const t = this.temp;
-    if (!(muted || t?.force)) for (const p of new Set(list.map((b) => b.path))) want.set(p, dapBreakpoints(list, p));
+    // .java breakpoints belong to the Gradle/JDWP sessions (gradle/java/session.ts), not to debugpy
+    if (!(muted || t?.force)) for (const p of new Set(list.filter((b) => !b.path.endsWith(".java")).map((b) => b.path))) want.set(p, dapBreakpoints(list, p));
     if (t) want.set(t.path, [...(want.get(t.path) ?? []), { line: t.line }]);
     return want;
   }
@@ -405,7 +414,7 @@ export class DebugSession {
     if (scopes[0] && !scopes[0].expensive) await this.ensureVars(scopes[0].ref);
   }
 
-  private publishExec() {
+  protected publishExec() {
     const s = this.state;
     const f = s.frames[s.frameIdx];
     if (s.status !== "paused" || !f?.path) { execStore.set({ point: null }); return; }

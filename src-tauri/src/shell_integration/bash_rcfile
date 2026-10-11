@@ -37,6 +37,14 @@ if [ -n "$ATELIER_SHELL_INTEGRATION" ] && [ -z "$__atelier_loaded" ]; then
     [ -r "$ATELIER_ACTIVATE" ] && . "$ATELIER_ACTIVATE" >/dev/null 2>&1
     unset ATELIER_ACTIVATE
   fi
+  # Claude notifications (see atelier.zsh): `claude` starts with Ace's hooks unless the user defines their own claude alias/function.
+  if [ -n "$ATELIER_HOOK_FILE" ] && [ -n "$ATELIER_CLAUDE_SETTINGS" ] && ! alias claude >/dev/null 2>&1 && ! declare -F claude >/dev/null 2>&1; then
+    claude() {
+      case "${1-}" in agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) command claude "$@"; return;; esac
+      local a; for a in "$@"; do case "$a" in -p|--print|-h|--help|-v|--version|--bg) command claude "$@"; return;; esac; done
+      command "${ATELIER_CLAUDE_BIN:-claude}" --settings "$ATELIER_CLAUDE_SETTINGS" "$@"
+    }
+  fi
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
     PROMPT_COMMAND=(__atelier_precmd "${PROMPT_COMMAND[@]}")
   else

@@ -415,6 +415,11 @@ pub fn run_interrupt(id: String) {
     }
 }
 
+/// (client pid, local) of a streaming run; used by the Gradle soft stop.
+pub fn run_pid(id: &str) -> Option<(u32, bool)> {
+    runs().lock().unwrap().get(id).map(|r| (r.pid, r.local))
+}
+
 #[tauri::command]
 pub fn run_alive(id: String) -> bool {
     runs().lock().unwrap().contains_key(&id)

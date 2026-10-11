@@ -48,6 +48,16 @@ export function setSourceDiags(owner: string, batch: Record<string, Diag[]>) {
   });
 }
 
+/** File Structure rows that do not come from a language server (Godot .tscn node outline). First provider that returns rows wins. */
+export interface PlainSymbol { name: string; kind: number; detail?: string; line: number; col: number; depth: number }
+type SymbolProvider = (path: string, text: string) => PlainSymbol[] | null;
+const symbolProviders: SymbolProvider[] = [];
+export const registerSymbolProvider = (p: SymbolProvider) => { symbolProviders.push(p); };
+export function customSymbols(path: string, text: string): PlainSymbol[] | null {
+  for (const p of symbolProviders) { const r = p(path, text); if (r) return r; }
+  return null;
+}
+
 export type ServerState = "idle" | "starting" | "ready" | "waiting" | "unavailable" | "error";
 export interface ServerStatus { state: ServerState; hint?: string; progress?: string; /** clickable remedy shown in the status bar / Problems window (e.g. "Install basedpyright") */ action?: () => void; actionLabel?: string }
 export const statusStore = createStore<{ servers: Record<string, ServerStatus>; note?: string }>({ servers: {} });

@@ -1,6 +1,6 @@
 /** Starting, restarting and stopping debug sessions (the glue between run configs, adapter choice, session and Debug window). */
 import { showToolWindow } from "../../../lib/layout";
-import type { DebugLaunchContext, PythonDebugTarget } from "../../run/hooks";
+import type { DebugLaunchContext, DebugTarget } from "../../run/hooks";
 import { chooseAdapter, offerInstallDebugpy } from "./adapter";
 import { loadBreakpoints } from "./bps";
 import { DebugSession, debugStore, liveSessions } from "./session";
@@ -8,11 +8,12 @@ import { DebugSession, debugStore, liveSessions } from "./session";
 export interface StartOpts { replace?: DebugSession; quiet?: boolean }
 
 /** Starts a debug session for `target`. Resolves with the session (or null when debugpy is missing: a notification offers the install). */
-export async function startDebugSession(target: PythonDebugTarget, _ctx?: Partial<DebugLaunchContext>, o: StartOpts = {}): Promise<DebugSession | null> {
+export async function startDebugSession(target: DebugTarget, _ctx?: Partial<DebugLaunchContext>, o: StartOpts = {}): Promise<DebugSession | null> {
   await loadBreakpoints();
-  const adapter = await chooseAdapter(target.host, target.python);
+  // Godot talks to the game directly (godot/dapShim.ts): no adapter process, no interpreter
+  const adapter = target.kind === "godot" ? { python: "godot", interp: null, own: true } : await chooseAdapter(target.host, target.python);
   if (!adapter) {
-    offerInstallDebugpy(target.host, target.python, () => void startDebugSession(target, _ctx, o));
+    if (target.kind === "python") offerInstallDebugpy(target.host, target.python, () => void startDebugSession(target, _ctx, o));
     return null;
   }
   const s = new DebugSession(target, adapter);
@@ -27,6 +28,7 @@ export async function startDebugSession(target: PythonDebugTarget, _ctx?: Partia
 }
 
 export async function rerunSession(s: DebugSession) {
+  if (s.customRerun) return s.customRerun();
   const target = s.target;
   await s.stop();
   return startDebugSession(target, undefined, { replace: s });

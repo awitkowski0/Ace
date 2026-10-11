@@ -1,0 +1,50 @@
+// Ace: prints every project / task / group / description of the build as ONE json line. Read-only: no task is executed,
+// nothing is written. Passed with --init-script from a temp location (never from the project).
+//
+// Layout (modular on purpose: add further collectors / hooks next to `collectTasks`, e.g. JavaExec / Exec hooks or per-task
+// classpath / output dirs for hot swap; each returns plain maps that are added under a new key of the JSON line):
+//   collectTasks(project) -> [[name, path, group, description, failed?]]
+//   dumpBuild(gradle)     -> the json document
+def collectTasks = { Project p ->
+  def out = []
+  // names() does not realize lazily registered tasks; each task is realized on its own so one broken task
+  // (plugins that resolve configurations while a task is created) does not fail the whole sync
+  p.tasks.names.toList().sort().each { String n ->
+    try {
+      def t = p.tasks.getByName(n)
+      out << [name: t.name, path: t.path, group: t.group, description: t.description]
+    } catch (Throwable e) {
+      out << [name: n, path: (p.path == ':' ? ':' : p.path + ':') + n, group: null, description: null, failed: true]
+    }
+  }
+  out
+}
+
+def collectTasksLocked = { Project p ->
+  // realize tasks while holding the project's mutable state lock (what the `tasks` report does); plugins such as Loom
+  // resolve configurations during task creation and refuse to do so without the lock
+  def owner = null
+  try { owner = p.owner } catch (Throwable ignore) {}
+  if (owner != null && owner.metaClass.respondsTo(owner, 'fromMutableState')) {
+    try { return owner.fromMutableState { collectTasks(p) } } catch (Throwable ignore) { /* fall through */ }
+  }
+  collectTasks(p)
+}
+
+def dumpBuild = { Gradle g ->
+  def pid = null
+  try { pid = java.lang.management.ManagementFactory.runtimeMXBean.name.split('@')[0] } catch (Throwable ignore) {}
+  def projs = []
+  g.rootProject.allprojects.each { Project p ->
+    projs << [name: p.name, path: p.path, dir: p.projectDir.absolutePath, description: p.description, tasks: collectTasksLocked(p)]
+  }
+  def inc = []
+  try { g.includedBuilds.each { b -> inc << [name: b.name, dir: b.projectDir.absolutePath] } } catch (Throwable ignore) {}
+  [name: g.rootProject.name, dir: g.rootProject.projectDir.absolutePath, gradleVersion: g.gradleVersion,
+   daemonPid: pid, includedBuilds: inc, projects: projs]
+}
+
+gradle.projectsEvaluated { Gradle g ->
+  if (g.parent != null) return
+  println "ACE-GRADLE-JSON:" + groovy.json.JsonOutput.toJson(dumpBuild(g))
+}

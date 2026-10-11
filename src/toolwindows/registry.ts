@@ -10,7 +10,7 @@
  */
 import type { ComponentType, ReactNode } from "react";
 import type { Location } from "../lib/ipc";
-import { createRegistry } from "../lib/store";
+import { createRegistry, createStore } from "../lib/store";
 
 export type Side = "left" | "right" | "bottom";
 
@@ -56,3 +56,9 @@ export interface StatusWidgetDef {
 }
 export const statusWidgets = createRegistry<StatusWidgetDef>();
 export const registerStatusWidget = statusWidgets.register;
+
+// ---- small badges on stripe buttons / header tabs (e.g. Claude sessions waiting) ----
+export interface ToolBadge { text: string; title: string; kind?: string }
+export const toolBadges = createStore<{ map: Record<string, ToolBadge | undefined> }>({ map: {} });
+export const setToolBadge = (id: string, b: ToolBadge | null) =>
+  toolBadges.set((s) => (s.map[id] === (b ?? undefined) ? {} : { map: { ...s.map, [id]: b ?? undefined } }));

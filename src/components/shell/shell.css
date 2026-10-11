@@ -12,3 +12,9 @@
 .tree-row.vcs-ignored .tree-name { color: #8c8a63; opacity: .8; } /* dimmed olive, like IntelliJ ignored folders */
 .tree-row.vcs-ignored .tree-icon { opacity: .55; }
 .tree-row.vcs-dir-modified .tree-name { color: var(--nord9); }
+
+.stripe-btn { position: relative; }
+.stripe-badge, .tw-badge { min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px; font-size: 10px; line-height: 14px; text-align: center; color: #2e3440; background: var(--nord14); font-weight: 600; }
+.stripe-badge { position: absolute; top: 1px; right: 1px; }
+.tw-badge { display: inline-block; margin-left: 6px; }
+.stripe-badge.question, .tw-badge.question { background: var(--nord12); }

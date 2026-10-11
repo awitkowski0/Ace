@@ -3,6 +3,7 @@ import { basename, fs, locKey, type Location } from "../lib/ipc";
 import { languageFor } from "./languages";
 import { confirmDialog } from "../components/shell/dialogs";
 import type { DiffSpec } from "../components/git/diff";
+import { decide, refine, type DualId, type ViewerId } from "./viewers/registry";
 
 export interface Doc {
   key: string;
@@ -16,6 +17,13 @@ export interface Doc {
   saved: string; // last saved/loaded content
   dirty: boolean;
   error?: string;
+  /** bytes-only viewer tab (image, audio, ...): no Monaco model, `initial`/`saved` are empty */
+  viewer?: ViewerId;
+  /** text doc that also has a rendered view (Markdown, CSV, SVG, ...) */
+  dual?: DualId;
+  /** bumped on external change so viewers reload their bytes */
+  rev?: number;
+  size?: number;
 }
 export interface Group {
   id: string;
@@ -96,6 +104,7 @@ export function currentPosition(): NavEntry | null {
   const key = activeDocKey();
   const d = key ? S().docs[key] : undefined;
   if (!key || !d || d.kind === "diff" || d.error) return null;
+  if (d.viewer) return { key, loc: d.loc, line: 1, col: 1 };
   return { key, loc: d.loc, line: S().cursor.line, col: S().cursor.col };
 }
 /** Record the current caret position as a navigation-history entry (call before programmatic jumps). */
@@ -145,26 +154,47 @@ export async function openFile(loc: Location, arg?: string | OpenOptions) {
   const opts: OpenOptions = typeof arg === "string" ? { group: arg } : (arg ?? {});
   const key = locKey(loc);
   if (!opts.noHistory && (opts.line || activeDocKey() !== key)) recordJump();
-  if (!S().docs[key]) {
-    try {
-      const text = await fs.readFile(loc);
-      const name = basename(loc.path);
-      const doc: Doc = { key, loc, name, language: languageFor(name), initial: text, saved: text, dirty: false };
-      editorStore.set((s) => ({ docs: { ...s.docs, [key]: doc } }));
-    } catch (e) {
-      const name = basename(loc.path);
-      const doc: Doc = { key, loc, name, language: "plaintext", initial: "", saved: "", dirty: false, error: String(e) };
-      editorStore.set((s) => ({ docs: { ...s.docs, [key]: doc } }));
-    }
-  }
+  if (!S().docs[key]) await loadDoc(loc, key);
   const g = S().groups[opts.group ?? S().activeGroup] ?? activeGroup();
   addTab(g.id, key);
   editorStore.set((s) => ({
     activeGroup: g.id,
     recent: [key, ...s.recent.filter((k) => k !== key)].slice(0, 50),
-    reveal: opts.line ? { key, line: opts.line, col: opts.col ?? 1, select: opts.select, nonce: revealSeq++ } : s.reveal,
+    reveal: opts.line && !S().docs[key]?.viewer ? { key, line: opts.line, col: opts.col ?? 1, select: opts.select, nonce: revealSeq++ } : s.reveal,
   }));
   enforceTabLimit(g.id);
+}
+
+/** Read a file into a Doc: a viewer tab for binary/media types, a text doc (possibly with a rendered view) otherwise. */
+async function loadDoc(loc: Location, key: string, forceText = false) {
+  const name = basename(loc.path);
+  try {
+    let d = decide(name);
+    if (forceText && (d.viewer === "binary" || d.viewer === "toolarge")) d = { needsProbe: false };
+    let size: number | undefined;
+    if (!d.viewer) {
+      // local probes are one tiny read; remote ones cost an ssh round trip, so only sniff unknown types there
+      const probe = loc.host === "local" || d.needsProbe ? await Promise.resolve(fs.probe?.(loc)).catch(() => null) : null;
+      size = probe?.size;
+      d = refine(d, probe ?? null, forceText);
+    }
+    if (d.viewer) {
+      const doc: Doc = { key, loc, name, language: "plaintext", initial: "", saved: "", dirty: false, viewer: d.viewer, rev: 0, size };
+      editorStore.set((s) => ({ docs: { ...s.docs, [key]: doc } }));
+      return;
+    }
+    const text = await fs.readFile(loc);
+    const doc: Doc = { key, loc, name, language: languageFor(name), initial: text, saved: text, dirty: false, dual: d.dual, size };
+    editorStore.set((s) => ({ docs: { ...s.docs, [key]: doc } }));
+  } catch (e) {
+    const doc: Doc = { key, loc, name, language: "plaintext", initial: "", saved: "", dirty: false, error: String(e) };
+    editorStore.set((s) => ({ docs: { ...s.docs, [key]: doc } }));
+  }
+}
+/** "Open anyway" on the too-large placeholder: reload the same tab as text. */
+export async function openAsText(key: string) {
+  const d = S().docs[key];
+  if (d) await loadDoc(d.loc, key, true);
 }
 
 /** Insert `key` as the active tab (after pinned tabs when new). */
@@ -255,6 +285,10 @@ export async function saveAll() {
 /** External change: reload clean docs; leave dirty ones alone. */
 export async function reloadIfChanged(key: string) {
   const d = S().docs[key];
+  if (d?.viewer) {
+    editorStore.set((s) => ({ docs: { ...s.docs, [key]: { ...s.docs[key], rev: (d.rev ?? 0) + 1 } } }));
+    return;
+  }
   if (!d || d.dirty || d.error) return;
   const text = await fs.readFile(d.loc).catch(() => null);
   if (text === null || text === d.saved) return;

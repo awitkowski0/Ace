@@ -153,9 +153,10 @@ function Form({ cfg, set, nameRef }: { cfg: RunConfig; set: (p: Partial<RunConfi
 function Field({ f, cfg, set }: { f: FieldDef; cfg: RunConfig; set: (p: Partial<RunConfig>) => void }) {
   const v = cfg[f.key];
   const remote = projectStore.get().root?.host !== "local";
-  const hint = f.hint ? <div className="rc-hint">{f.hint}</div> : null;
+  const hintText = typeof f.hint === "function" ? f.hint() : f.hint;
+  const hint = hintText ? <div className="rc-hint">{hintText}</div> : null;
   if (f.kind === "checkbox") {
-    return <div className="rc-row"><span className="rc-label" /><label className="rc-check"><input type="checkbox" data-field={f.key} checked={!!v} onChange={(e) => set({ [f.key]: e.target.checked })} /> {f.label}</label></div>;
+    return <div className="rc-row"><span className="rc-label" /><div className="rc-input"><label className="rc-check"><input type="checkbox" data-field={f.key} checked={!!v} onChange={(e) => set({ [f.key]: e.target.checked })} /> {f.label}</label>{hint}</div></div>;
   }
   let input: React.ReactNode;
   if (f.kind === "text") input = <input className="dialog-input" data-field={f.key} value={String(v ?? "")} placeholder={f.placeholder} spellCheck={false} onChange={(e) => set({ [f.key]: e.target.value })} />;

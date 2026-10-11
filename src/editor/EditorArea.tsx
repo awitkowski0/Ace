@@ -11,13 +11,21 @@ import {
 import { FindBar } from "./FindBar";
 import { findStore } from "./find";
 import { toggleHideAllWindows } from "./hideAll";
-import { getEditor, registerEditor, setActiveEditorGroup, unregisterEditor } from "./editorRegistry";
+import { getEditor, registerEditor, setActiveEditorGroup, setViewerInFront, unregisterEditor } from "./editorRegistry";
 import { useStore } from "../lib/store";
 import { fs, locKey } from "../lib/ipc";
 import { showContextMenu } from "../components/shell/contextMenu";
 import { CloseIcon, DiffIcon, FileIcon, PinIcon } from "../components/shell/icons";
 import { keysFor } from "../actions/keymap";
 import { formatKeystroke } from "../actions/keystroke";
+import { ViewerHost, DualPreview } from "./viewers/ViewerHost";
+import { emitText, installTextGetter } from "./viewers/textBus";
+import { useDocText } from "./viewers/textBus";
+import { setPrefs, usePrefs } from "./viewers/io";
+import { controllerFor } from "./viewers/controllers";
+import { PROVIDERS, type DualMode } from "./viewers/registry";
+import "./viewers/viewers.css";
+import "./viewers/actions";
 
 const DiffView = lazy(() => import("../components/git/DiffPopup").then((m) => ({ default: m.DiffView })));
 
@@ -34,6 +42,13 @@ installModelBridge({
   setText: (key, text) => monaco.editor.getModel(modelUri(key))?.setValue(text),
   dispose: (key) => monaco.editor.getModel(modelUri(key))?.dispose(),
 });
+
+setViewerInFront(() => { const s = editorStore.get(); return !!s.docs[s.groups[s.activeGroup]?.active ?? ""]?.viewer; });
+
+// rendered views (Markdown preview, CSV table, SVG) follow the live Monaco text
+const keyOfUri = (u: { scheme: string; authority: string; path: string }) => (u.scheme === "file" ? `local:${u.path}` : `${u.authority}:${u.path}`);
+installTextGetter((key) => monaco.editor.getModel(modelUri(key))?.getValue());
+monaco.editor.onDidCreateModel((m) => { const key = keyOfUri(m.uri); m.onDidChangeContent(() => emitText(key)); });
 
 // ---- background model eviction ----
 /** Models kept alive besides the visible ones: this many most-recently-used tabs. */
@@ -129,6 +144,8 @@ function EditorGroupView({ id }: { id: string }) {
   const g = groups[id];
   const edRef = useRef<editor.IStandaloneCodeEditor>();
   const tabsRef = useRef<HTMLDivElement>(null);
+  const lastText = useRef<string | null>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
   const [keysReady, setKeysReady] = useState(false);
   useEffect(() => { keymapReady.then(() => setKeysReady(true)); }, []);
   useEffect(() => () => { unregisterEditor(id); }, [id]);
@@ -139,9 +156,16 @@ function EditorGroupView({ id }: { id: string }) {
   useEffect(() => {
     tabsRef.current?.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeKey, g?.tabs.length]);
+  const doc = g?.active ? docs[g.active] : undefined;
+  const dualPrefs = usePrefs(doc?.key ?? "");
+  useEffect(() => { if (doc?.viewer && activeGroup === id) viewerRef.current?.focus({ preventScroll: true }); }, [doc?.key, doc?.viewer]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!g) return null;
-  const doc = g.active ? docs[g.active] : undefined;
   const isActiveGroup = activeGroup === id;
+  const isViewer = !!doc?.viewer;
+  const prefsMode = dualPrefs.mode;
+  if (doc && !doc.viewer && doc.kind !== "diff" && !doc.error) lastText.current = doc.key;
+  // Monaco keeps showing the last text doc (hidden) while a viewer tab is in front, so caret/scroll state survives
+  const edDoc = isViewer ? (lastText.current && docs[lastText.current] && !docs[lastText.current].viewer ? docs[lastText.current] : undefined) : doc;
   const diffTabs = g.tabs.filter((k) => docs[k]?.kind === "diff");
 
   const tabMenu = (e: React.MouseEvent, key: string) => {
@@ -215,35 +239,83 @@ function EditorGroupView({ id }: { id: string }) {
         ))}
         {doc?.kind === "diff" ? null : doc?.error ? (
           <div className="editor-empty">{doc.error}</div>
-        ) : doc && keysReady ? (
-          <Editor
-            key={id}
-            path={uriString(doc.key)}
-            defaultValue={doc.initial}
-            language={doc.language}
-            theme="nord"
-            keepCurrentModel
-            loading={null}
-            onChange={(v) => setDirtyFromText(doc.key, v ?? "")}
-            onMount={(ed) => {
-              edRef.current = ed;
-              registerEditor(id, ed);
-              ed.onDidFocusEditorText(() => { setActiveGroup(id); setActiveEditorGroup(id); const p = ed.getPosition(); if (p) setCursor(p.lineNumber, p.column); });
-              ed.onDidChangeCursorPosition((e) => editorStore.get().activeGroup === id && setCursor(e.position.lineNumber, e.position.column));
-              ed.onDidChangeModel(() => applyReveal(id, ed));
-              ed.onDidDispose(() => { if (getEditor(id) === ed) unregisterEditor(id); });
-              setActiveEditorGroup(editorStore.get().activeGroup);
-              if (editorStore.get().activeGroup === id && !editorStore.get().reveal) ed.focus();
-              applyReveal(id, ed);
-            }}
-            options={EDITOR_OPTIONS}
-          />
+        ) : edDoc && keysReady ? (
+          <div className="ed-wrap" style={isViewer ? { display: "none" } : undefined}>
+            {!isViewer && doc?.dual && <DualBar doc={doc} />}
+            <div className="ed-split">
+              <div className={"ed-pane ed-code" + (!isViewer && doc?.dual && dualMode(doc, prefsMode) === "preview" ? " hidden" : "")}>
+                <Editor
+                  key={id}
+                  path={uriString(edDoc.key)}
+                  defaultValue={edDoc.initial}
+                  language={edDoc.language}
+                  theme="nord"
+                  keepCurrentModel
+                  loading={null}
+                  onChange={(v) => setDirtyFromText(edDoc.key, v ?? "")}
+                  onMount={(ed) => {
+                    edRef.current = ed;
+                    registerEditor(id, ed);
+                    ed.onDidFocusEditorText(() => { setActiveGroup(id); setActiveEditorGroup(id); const p = ed.getPosition(); if (p) setCursor(p.lineNumber, p.column); });
+                    ed.onDidChangeCursorPosition((e) => editorStore.get().activeGroup === id && setCursor(e.position.lineNumber, e.position.column));
+                    ed.onDidChangeModel(() => applyReveal(id, ed));
+                    ed.onDidDispose(() => { if (getEditor(id) === ed) unregisterEditor(id); });
+                    setActiveEditorGroup(editorStore.get().activeGroup);
+                    if (editorStore.get().activeGroup === id && !editorStore.get().reveal && !editorStore.get().docs[editorStore.get().groups[id]?.active ?? ""]?.viewer) ed.focus();
+                    applyReveal(id, ed);
+                  }}
+                  options={EDITOR_OPTIONS}
+                />
+              </div>
+              {!isViewer && doc?.dual && dualMode(doc, prefsMode) !== "editor" && (
+                <div className="ed-pane ed-prev"><DualPreviewHost doc={doc} groupId={id} mode={dualMode(doc, prefsMode)} /></div>
+              )}
+            </div>
+          </div>
         ) : !doc ? (
           <EmptyState />
         ) : null}
+        {isViewer && doc && (
+          <div
+            className="viewer-host" ref={viewerRef} tabIndex={-1}
+            onKeyDown={(e) => {
+              if ((e.target as HTMLElement).closest("button,input,select,textarea")) return;
+              const c = controllerFor(id);
+              if (e.key === " " && c?.playPause) { e.preventDefault(); c.playPause(); }
+              else if (e.key.toLowerCase() === "f" && !e.metaKey && !e.ctrlKey && c?.frameAll) { e.preventDefault(); c.frameAll(); }
+            }}
+          >
+            <ViewerHost doc={doc} groupId={id} />
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function dualMode(doc: { dual?: string; name: string }, m: DualMode | undefined): DualMode {
+  return m ?? PROVIDERS.find((p) => p.id === doc.dual)?.defaultMode ?? "split";
+}
+
+/** IntelliJ-style Editor | Editor and Preview | Preview switch for text docs with a rendered view. */
+function DualBar({ doc }: { doc: { key: string; dual?: string; name: string } }) {
+  const prefs = usePrefs(doc.key);
+  const mode = dualMode(doc, prefs.mode);
+  const label = PROVIDERS.find((p) => p.id === doc.dual)?.previewLabel ?? "Preview";
+  const B = (m: DualMode, text: string, tip: string) => (
+    <button className={mode === m ? "on" : ""} title={tip} onClick={() => setPrefs(doc.key, { mode: m })} data-mode={m}>{text}</button>
+  );
+  return (
+    <div className="dual-bar" data-testid="dual-bar">
+      <span className="grow" />
+      <div className="seg">{B("editor", "Editor", "Show editor only")}{B("split", "Editor and " + label, "Show editor and preview")}{B("preview", label, "Show preview only")}</div>
+    </div>
+  );
+}
+
+function DualPreviewHost({ doc, groupId, mode }: { doc: import("./store").Doc; groupId: string; mode: DualMode }) {
+  const text = useDocText(doc.key);
+  return <DualPreview doc={doc} groupId={groupId} text={text} sync={mode === "split" && doc.dual === "markdown"} />;
 }
 
 function EmptyState() {

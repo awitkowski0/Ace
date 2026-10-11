@@ -59,6 +59,10 @@ struct CacheState {
 type Cache = Mutex<CacheState>;
 
 fn cache_file() -> Option<std::path::PathBuf> {
+    // A test override of the projects dir must never overwrite the real session snapshot.
+    if std::env::var_os("ATELIER_CLAUDE_PROJECTS").is_some() {
+        return None;
+    }
     dirs::cache_dir().map(|c| c.join("atelier").join(format!("claude-sessions.v{CACHE_VERSION}.json")))
 }
 
@@ -192,7 +196,11 @@ fn parse_file(path: &Path, id: &str, mtime: u64, size: u64) -> SessionInfo {
     info
 }
 
-fn projects_dir() -> Option<std::path::PathBuf> {
+/// `~/.claude/projects`; `ATELIER_CLAUDE_PROJECTS` overrides it (automation tests with synthetic transcripts).
+pub(crate) fn projects_dir() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("ATELIER_CLAUDE_PROJECTS") {
+        return Some(p.into());
+    }
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))
 }
 
@@ -400,7 +408,7 @@ fn parse_ps(ps: &str, cwds: &HashMap<u32, String>) -> Vec<RunningClaude> {
 }
 
 /// Claude's project folder name for a cwd: every non-alphanumeric char becomes '-'.
-fn encode_cwd(cwd: &str) -> String {
+pub(crate) fn encode_cwd(cwd: &str) -> String {
     cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
@@ -525,7 +533,8 @@ pub async fn claude_running(host: String) -> Result<Vec<RunningClaude>, String> 
 }
 
 // ---- local watcher: emits `claude://changed` (debounced) to the windows that asked for it ----
-// One watcher for the whole app (the sessions dir is global), reference counted by window label.
+// One watcher for the whole app (the sessions dir is global), reference counted by window label. It is also the event source of the
+// transcript fallback (claude_hooks::on_paths), which keeps it alive without the Claude panel being open.
 fn watcher() -> &'static Mutex<Option<notify::RecommendedWatcher>> {
     static W: OnceLock<Mutex<Option<notify::RecommendedWatcher>>> = OnceLock::new();
     W.get_or_init(|| Mutex::new(None))
@@ -535,28 +544,33 @@ fn watchers() -> &'static Mutex<std::collections::BTreeSet<String>> {
     W.get_or_init(Default::default)
 }
 
-#[tauri::command]
-pub fn claude_watch(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+pub(crate) fn ensure_watcher(app: &tauri::AppHandle) -> Result<(), String> {
     use notify::{EventKind, Watcher};
-    watchers().lock().unwrap().insert(window.label().to_string());
     let mut g = watcher().lock().unwrap();
     if g.is_some() {
         return Ok(());
     }
     let Some(root) = projects_dir().filter(|p| p.exists()) else { return Ok(()) };
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<std::path::PathBuf>>();
+    let app = app.clone();
     std::thread::spawn(move || {
-        while rx.recv().is_ok() {
+        while let Ok(first) = rx.recv() {
+            let mut paths: std::collections::HashSet<std::path::PathBuf> = first.into_iter().collect();
             std::thread::sleep(std::time::Duration::from_millis(700));
-            while rx.try_recv().is_ok() {}
+            while let Ok(more) = rx.try_recv() {
+                paths.extend(more);
+            }
             let labels = watchers().lock().unwrap().clone();
-            crate::windows::emit_windows(&app, labels.iter(), "claude://changed", ());
+            if !labels.is_empty() {
+                crate::windows::emit_windows(&app, labels.iter(), "claude://changed", ());
+            }
+            crate::claude_hooks::on_paths(&app, &paths);
         }
     });
     let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(ev) = res {
             if !matches!(ev.kind, EventKind::Access(_)) {
-                let _ = tx.send(());
+                let _ = tx.send(ev.paths);
             }
         }
     })
@@ -566,21 +580,31 @@ pub fn claude_watch(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Resu
     Ok(())
 }
 
-#[tauri::command]
-pub fn claude_unwatch(window: tauri::WebviewWindow) {
-    release_window(window.label());
-}
-
-/// Leave the shared watcher; the last window to leave drops it (which closes the channel and ends the debounce thread).
-pub fn release_window(label: &str) {
-    let empty = {
-        let mut w = watchers().lock().unwrap();
-        w.remove(label);
-        w.is_empty()
-    };
-    if empty {
+/// Drop the shared watcher when neither the panel nor the notification fallback of any window needs it
+/// (dropping it closes the channel and ends the debounce thread).
+pub(crate) fn maybe_drop_watcher() {
+    if watchers().lock().unwrap().is_empty() && !crate::claude_hooks::fallback_active() {
         *watcher().lock().unwrap() = None;
     }
+}
+
+#[tauri::command]
+pub fn claude_watch(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    watchers().lock().unwrap().insert(window.label().to_string());
+    ensure_watcher(&app)
+}
+
+#[tauri::command]
+pub fn claude_unwatch(window: tauri::WebviewWindow) {
+    watchers().lock().unwrap().remove(window.label());
+    maybe_drop_watcher();
+}
+
+/// A window closed: leave the shared watcher, stop its hook listeners / followers / fallback scope.
+pub fn release_window(label: &str) {
+    watchers().lock().unwrap().remove(label);
+    crate::claude_hooks::release_window(label);
+    maybe_drop_watcher();
 }
 
 #[tauri::command]

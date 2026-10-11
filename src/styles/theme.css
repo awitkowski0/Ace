@@ -127,9 +127,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* Popups, dialogs, menus */
 .popup-backdrop, .dialog-backdrop, .menu-backdrop { position: fixed; inset: 0; z-index: 100; }
 .popup-backdrop { display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
-.dialog-backdrop { display: grid; place-items: center; background: rgba(0,0,0,.25); z-index: 110; }
+.dialog-backdrop { display: grid; place-items: center; background: var(--backdrop, rgba(0,0,0,.25)); z-index: 110; }
 .menu-backdrop { z-index: 120; }
-.popup { max-width: 92vw; background: var(--bg-popup); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; overflow: hidden; }
+.popup { max-width: 92vw; background: var(--bg-popup); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px var(--shadow, rgba(0,0,0,.5)); display: flex; flex-direction: column; overflow: hidden; }
 .popup-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px 0; }
 .popup-title { font-weight: 600; margin-right: 12px; }
 .popup-tab { padding: 3px 10px; border-radius: 6px; color: var(--fg-dim); }
@@ -147,7 +147,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .dialog-input { width: 100%; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-input); }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 button.primary, .dialog-buttons button { height: 28px; padding: 0 14px; border-radius: 6px; background: var(--bg-hover); }
-button.primary, .dialog-buttons button.primary { background: var(--accent-bg); color: #fff; }
+button.primary, .dialog-buttons button.primary { background: var(--accent-bg); color: var(--on-accent, #fff); }
 .menu { position: fixed; min-width: 200px; padding: 4px; background: var(--bg-popup); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
 .menu-item { height: 26px; padding: 0 10px; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .menu-item:hover { background: var(--bg-selected); }
@@ -162,8 +162,8 @@ button.primary, .dialog-buttons button.primary { background: var(--accent-bg); c
 
 /* scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: rgba(76,86,106,.5); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(76,86,106,.9); background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb, rgba(76,86,106,.5)); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover, rgba(76,86,106,.9)); background-clip: padding-box; border: 2px solid transparent; }
 .dialog-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
 .dialog-msg { white-space: pre-wrap; word-break: break-all; }
 .rp-list { max-height: 360px; overflow: auto; padding: 0 6px 6px; }

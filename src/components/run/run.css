@@ -124,3 +124,4 @@
 .rc-foot button:disabled { opacity: .5; }
 .rc-err { color: var(--nord11); font-size: 12px; }
 .choose-row .se-icon svg { width: 14px; height: 14px; }
+.menu-section { padding: 4px 10px 2px; font-size: 11px; color: var(--text-dim, #81a1c1); text-transform: none; opacity: .8; }

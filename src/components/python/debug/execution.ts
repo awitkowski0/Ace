@@ -3,6 +3,7 @@ import type { editor, IDisposable } from "monaco-editor";
 import { watchEditors } from "../glyph";
 import { acceptModel, modelLoc } from "./gutter";
 import { hoverExpression, inlineValues } from "./pure";
+import { debugLanguages } from "../../run/hooks";
 import { debugStore, execStore, pausedSession, type ExecPoint } from "./session";
 
 const GLYPH_RIGHT = 3;
@@ -66,7 +67,7 @@ export function installExecution(): () => void {
 
 function registerHover(monaco: typeof import("monaco-editor")): IDisposable {
   {
-    return monaco.languages.registerHoverProvider("python", {
+    return monaco.languages.registerHoverProvider(["python", ...debugLanguages()], {
       async provideHover(model, pos) {
         const s = pausedSession();
         if (!s || !acceptModel(model)) return null;

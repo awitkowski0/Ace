@@ -22,7 +22,7 @@ export async function checks(c) {
 
   await check("python project detected, config types registered", async () => {
     await py(`return 1`);
-    for (let i = 0; i < 100; i++) { const t = await R("return run.types()"); if (t.every((x) => x.available)) return { ok: t.map((x) => x.id).join(",").includes("pytest") && t.length >= 5, note: t.map((x) => x.id).join(",") }; await sleep(150); }
+    for (let i = 0; i < 100; i++) { const t = await R("return run.types()"); if (t.filter((x) => ["python", "python-module", "pytest", "unittest", "shell"].includes(x.id)).every((x) => x.available)) return { ok: t.map((x) => x.id).join(",").includes("pytest") && t.length >= 5, note: t.map((x) => x.id).join(",") }; await sleep(150); }
     return { ok: false, note: JSON.stringify(await R("return run.types()")) };
   });
 

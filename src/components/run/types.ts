@@ -2,7 +2,7 @@
 import type { ComponentType, ReactNode } from "react";
 import type { Location } from "../../lib/ipc";
 import type { RunSpec } from "../python/api";
-import type { PythonDebugTarget } from "./hooks";
+import type { DebugTarget, JavaDebugTarget } from "./hooks";
 import type { Session } from "./sessions";
 
 export type Mode = "run" | "debug";
@@ -20,7 +20,8 @@ export interface RunConfig {
 interface FieldBase {
   key: string;
   label: string;
-  hint?: string;
+  /** a function is evaluated on every render of the dialog (live info such as detected runtimes) */
+  hint?: string | (() => string);
   placeholder?: string;
   /** hide the field for some states of the config (e.g. "custom" target kind) */
   visible?: (cfg: RunConfig) => boolean;
@@ -48,17 +49,31 @@ export interface ResolvedRun {
   /** first console line (PyCharm prints the interpreter + script command line) */
   commandLine: string;
   /** Debug mode: the program for the debugger (instead of `spec`) */
-  debug?: PythonDebugTarget;
+  debug?: DebugTarget;
+  /** Debug mode of a Gradle run: the process runs in the Run window, the debugger attaches to its JVM over JDWP (gradle/java) */
+  javaDebug?: JavaDebugTarget;
   /** The process speaks the Ace test protocol (`\x1e##ace:{json}` lines): the Run window shows the test tree */
   tests?: { kind: "pytest" | "unittest" | string };
   /** Other control events (anything that is not a test event) */
   onControl?: (ev: Record<string, unknown>, session: Session) => void;
   /** Extra side panel for the session (replaces the test tree) */
   panel?: ComponentType<{ session: Session }>;
+  /** Graceful stop (Gradle: cancel the build through the client, keep the daemon). Default: SIGTERM the process tree. */
+  softStop?: (runId: string) => void;
+  /** Stop this process after N seconds (Godot run_godot.sh style): only this process is killed, a note is printed */
+  timeLimitSec?: number;
+  /** Stateful filter between the process output and the console (colouring, problem extraction). `end` runs once at exit. */
+  output?: (session: Session) => OutputFilter;
   /** Notes printed in the console before the process starts (e.g. "pytest is not installed") */
   warnings?: string[];
   /** pytest is missing etc: the Run window offers an install hint with this package */
   missingPackage?: { name: string; message: string; detail: string; install(log: (text: string) => void): Promise<boolean> };
+}
+
+/** See ResolvedRun.output: receives raw segments and emits (possibly rewritten / delayed) text into the console. */
+export interface OutputFilter {
+  push(kind: "out" | "err", text: string, emit: (kind: "out" | "err", text: string) => void): void;
+  end(emit: (kind: "out" | "err", text: string) => void): void;
 }
 
 export interface ConfigType {
@@ -78,6 +93,9 @@ export interface ConfigType {
   validate?(cfg: RunConfig): string | null;
   /** test types: a config that runs exactly these node ids (Rerun Failed Tests, "Run this test") */
   forTestNodes?(cfg: RunConfig, ids: string[]): RunConfig;
+  /** One run starts several processes (Godot "multiple instances"): the per-process configurations (distinct ids, `groupOf` = this
+   * configuration). Stop / Rerun on any of their tabs act on the whole group. Return `null` / one element for a plain run. */
+  expand?(cfg: RunConfig): RunConfig[] | null;
   /** sort position in the "Add New Configuration" menu */
   order?: number;
   /** whether Debug mode is supported */

@@ -77,6 +77,8 @@ Not bound on purpose because IntelliJ owns them: ⌘1-9 (tool windows), ⌃⇥ /
 - **Secure keyboard entry**: `Terminal: Toggle Secure Keyboard Entry` (Carbon `EnableSecureEventInput`).
 - **Confirm close**: closing a split/tab with a running command asks first (OSC 133 state, or the pty's foreground process group for local shells).
 
+- **Claude hooks** (`terminal/spawnHook.ts`, optional): before each spawn the Claude module may return a hook-channel file; the pty then runs `claude` with `--settings` hooks and exports `ATELIER_HOOK_FILE`/`ATELIER_PANE` so a `claude` function (zsh/bash integration, skipped when the user has their own alias/function) does the same for typed commands. Terminal tabs can carry a badge via `tabDecor.badge`. See `docs/AI-SESSIONS.md`.
+
 ## Not possible / not done
 
 - **GPU-native renderer**: Ghostty renders with Metal; xterm.js with WebGL inside WKWebView is the closest available.

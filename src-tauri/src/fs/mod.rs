@@ -3,6 +3,7 @@
 pub mod local;
 pub mod remote;
 pub mod watch;
+pub mod bytes;
 
 use crate::location::Location;
 use serde::{Deserialize, Serialize};

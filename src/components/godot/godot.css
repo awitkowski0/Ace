@@ -1,0 +1,17 @@
+.gd { height: 100%; display: flex; flex-direction: column; min-width: 0; outline: none; }
+.gd-body { flex: 1; min-height: 0; overflow: auto; outline: none; padding: 2px 0; }
+.gd-row { height: 24px; display: flex; align-items: center; gap: 2px; white-space: nowrap; margin: 0 4px; border-radius: 4px; cursor: default; }
+.gd-row:hover { background: var(--bg-hover); }
+.gd-row.selected { background: var(--bg-selected); }
+.gd-body:not(:focus-within) .gd-row.selected { background: var(--bg-hover); }
+.gd-row.dragover { box-shadow: inset 0 2px 0 var(--nord8); }
+.gd-row.section { color: var(--fg-dim); font-weight: 600; font-size: 12px; }
+.gd-chev { width: 14px; flex: none; display: grid; place-items: center; color: var(--fg-dim); }
+.gd-ico { flex: none; display: grid; place-items: center; color: var(--fg-dim); margin-left: 2px; }
+.gd-ico.run { color: var(--nord14); } .gd-ico.scene { color: var(--nord9); } .gd-ico.script { color: var(--nord13); } .gd-ico.pin { color: var(--nord13); } .gd-ico.preset { color: var(--nord15); }
+.gd-label { margin-left: 4px; overflow: hidden; text-overflow: ellipsis; }
+.gd-hint { margin-left: 8px; color: var(--fg-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.gd-status { flex: none; border-top: 1px solid var(--border); padding: 3px 8px; font-size: 12px; color: var(--fg-dim); min-height: 22px; display: flex; align-items: center; gap: 8px; }
+.gd-empty { padding: 12px; color: var(--fg-dim); }
+.gd-struct { height: 100%; overflow: auto; outline: none; padding: 2px 0; }
+.gd-struct .gd-row { margin: 0 4px; }

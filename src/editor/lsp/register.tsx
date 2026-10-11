@@ -7,6 +7,7 @@ import { registerPopup, openPopup } from "../../components/shell/popups";
 import { activeEditor, triggerEditor } from "../editorRegistry";
 import { intentionProviderList } from "./servers";
 import { activeServerReady, bootWhenNeeded, lsp, prewarmGodotWhenIdle, trackGodotFocus } from "./api";
+import { customSymbols } from "./state";
 import { FileStructurePopup, IntentionsPopup, InspectionWidget, ProblemsPanel, UsagesPanel, gotoProblem } from "./ui";
 
 registerToolWindow({
@@ -31,6 +32,9 @@ registerAction({
 registerAction({
   context: "editor", id: "FileStructurePopup", intellijId: "FileStructurePopup", title: "File Structure", defaultKeys: ["meta F12"], isEnabled: hasEditor,
   run: async () => {
+    const m = activeEditor()?.getModel();
+    const custom = m ? customSymbols(m.uri.path, m.getValue()) : null;
+    if (custom?.length) return openPopup("FileStructure", custom);
     const rows = activeServerReady() ? await lsp.symbols() : null;
     if (rows?.length) openPopup("FileStructure", rows);
     else triggerEditor("editor.action.quickOutline");

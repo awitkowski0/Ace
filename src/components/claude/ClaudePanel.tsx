@@ -9,6 +9,7 @@ import { promptDialog } from "../shell/dialogs";
 import { openFile } from "../../editor/store";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { claudeApi, claudeStore, launch, openSessionProject, refreshHost, relTime, runningIds, unknownRunning, type SessionInfo } from "./api";
+import { aiStore, attnFor, isOptedIn, paneForSession, toggleOptIn, clearAttn, skey } from "./ai";
 import "./claude.css";
 
 const HOST_KEY = "atelier.claude.host";
@@ -35,6 +36,7 @@ export function ClaudePanel({ root }: ToolWindowProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [, tick] = useState(0);
   const { hosts: data } = useStore(claudeStore);
+  useStore(aiStore);
 
   useEffect(() => {
     invoke<string[]>("remote_hosts").then(setHosts).catch(() => {});
@@ -130,13 +132,14 @@ export function ClaudePanel({ root }: ToolWindowProps) {
     e.preventDefault();
     setSel(`${s.host}:${s.id}`);
     showContextMenu(e.clientX, e.clientY, [
-      { label: "Resume", run: () => launch.resume(s) },
+      { label: paneForSession(s.host, s.id) ? "Go to Terminal" : "Resume", run: () => launch.resume(s) },
       { label: "Continue Last in Project", run: () => launch.continueLast(s.host, s.cwd) },
       { label: "Fork Session", run: () => launch.fork(s) },
       { label: "New Session in Project", run: () => launch.newSession(s.host, s.cwd) },
       { label: "", separator: true },
       { label: "Open Project", run: () => void openSessionProject(s) },
       { label: s.host === "local" ? "Reveal JSONL in Finder" : "Open JSONL in Editor", run: () => (s.host === "local" ? claudeApi.reveal(s.file) : void openFile({ host: s.host, path: s.file })) },
+      { label: (isOptedIn(s.host, s.id) ? "✓ " : "") + "Notify When Done / Needs Input", run: () => { toggleOptIn({ host: s.host, id: s.id, file: s.file }); } },
       { label: "Copy Session ID", run: () => void navigator.clipboard.writeText(s.id) },
     ]);
   };
@@ -202,9 +205,12 @@ export function ClaudePanel({ root }: ToolWindowProps) {
             {isOpen(g) && g.items.map((s) => {
               const k = `${s.host}:${s.id}`;
               return (
-                <div key={k} className={"claude-row" + (sel === k ? " sel" : "")} title={`${s.title}\n${s.id}`}
-                  onClick={() => setSel(k)} onDoubleClick={() => launch.resume(s)} onContextMenu={(e) => menu(e, s)}>
+                <div key={k} className={"claude-row" + (sel === k ? " sel" : "")} title={`${s.title}\n${s.id}`} data-session={s.id} data-attn={attnFor(s.host, s.id)?.kind}
+                  onClick={() => { setSel(k); clearAttn(skey(s.host, s.id)); }} onDoubleClick={() => launch.resume(s)} onContextMenu={(e) => menu(e, s)}>
                   <div className="t">
+                    {attnFor(s.host, s.id) && <span className={"claude-badge " + attnFor(s.host, s.id)!.kind} title={attnFor(s.host, s.id)!.text}>{attnFor(s.host, s.id)!.kind === "question" ? "needs input" : "finished"}</span>}
+                    {paneForSession(s.host, s.id) && <span className="claude-badge term" title="Open in an Ace terminal tab (Enter focuses it)">terminal</span>}
+                    {isOptedIn(s.host, s.id) && <span className="claude-badge term" title="Notifications on for this session (transcript)">notify</span>}
                     {running.has(k) && <span className="claude-badge">running</span>}
                     <span className="txt">{s.title}</span>
                   </div>

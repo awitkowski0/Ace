@@ -55,6 +55,10 @@ pub struct SpawnOpts {
     pub shell: Option<String>,
     /// Local interactive shells only: `<venv>/bin/activate`, sourced once at the first prompt (env `ATELIER_ACTIVATE`).
     pub activate: Option<String>,
+    /// Claude notification channel (docs/AI-SESSIONS.md): file the Stop/Notification hooks append to. `claude ...` commands get
+    /// `--settings <hooks>`; interactive shells get ATELIER_HOOK_FILE/ATELIER_PANE/ATELIER_CLAUDE_SETTINGS for the `claude` wrapper function.
+    #[serde(default)]
+    pub hook_file: Option<String>,
 }
 
 /// Output sink: (data bytes) / (exit code).
@@ -103,7 +107,8 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
         cb = CommandBuilder::new(&shell);
         match (&o.command, &dir) {
             (Some(c), _) => {
-                cb.args(["-lc", c.as_str()]);
+                let wrapped = if o.hook_file.is_some() { crate::claude_hooks::wrap_command(c, "local") } else { None };
+                cb.args(["-lc", wrapped.as_deref().unwrap_or(c.as_str())]);
             }
             (None, Some(d)) if base == "bash" => {
                 // bash ignores --rcfile for login shells, so the rcfile emulates the login profile itself.
@@ -139,6 +144,11 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
         } else if let Some(h) = dirs::home_dir() {
             cb.cwd(h);
         }
+        if let (Some(f), Some(id)) = (o.hook_file.as_deref(), o.id.as_deref()) {
+            cb.env("ATELIER_HOOK_FILE", f);
+            cb.env("ATELIER_PANE", id);
+            cb.env("ATELIER_CLAUDE_SETTINGS", crate::claude_hooks::settings_json());
+        }
     } else {
         use crate::remote::ssh::{command, login_wrap, quote};
         let c = command(&o.host, true);
@@ -153,9 +163,16 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
         } else {
             format!("cd {}", quote(&o.cwd))
         };
+        let hook = o.hook_file.as_deref().zip(o.id.as_deref());
         let remote = match &o.command {
-            Some(c) => login_wrap(&format!("{cd} && {c}")),
-            None if integ => remote_integration_command(&cd),
+            Some(c) => match hook.and_then(|(f, id)| crate::claude_hooks::wrap_command(c, &o.host).map(|w| (f, id, w))) {
+                Some((f, id, w)) => login_wrap(&format!("{cd} && {}{w}", crate::claude_hooks::env_prefix(f, id, false))),
+                None => login_wrap(&format!("{cd} && {c}")),
+            },
+            None if integ => match hook {
+                Some((f, id)) => remote_integration_command(&format!("{cd} && export {}", crate::claude_hooks::env_prefix(f, id, true).trim_end())),
+                None => remote_integration_command(&cd),
+            },
             None => format!("{cd} && exec $SHELL -l"),
         };
         cb.arg(remote);
@@ -178,6 +195,7 @@ pub fn remote_integration_command(cd: &str) -> String {
 /// Core spawn path (also used by tests). Returns the session id.
 pub fn spawn_with(o: SpawnOpts, owner: &str, sink: Arc<dyn Fn(&str, Out) + Send + Sync>) -> Result<String, String> {
     let id = o.id.clone().unwrap_or_else(|| format!("pty-{}", uuid_like()));
+    let o = SpawnOpts { id: Some(id.clone()), ..o };
     let pair = native_pty_system()
         .openpty(PtySize { rows: o.rows.max(1), cols: o.cols.max(1), pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
@@ -373,7 +391,7 @@ mod tests {
             let _ = tx.lock().unwrap().send(o);
         });
         let id = spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, id: Some("t1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, hook_file: None, id: Some("t1".into()) },
             "test",
             sink,
         )
@@ -406,7 +424,7 @@ mod tests {
             }
         });
         spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, id: Some("fc1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, hook_file: None, id: Some("fc1".into()) },
             "test",
             sink,
         )
@@ -441,7 +459,7 @@ mod tests {
             let _ = tx.lock().unwrap().send(o);
         });
         spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: None, cols: 80, rows: 24, login: Some(true), shell_integration: Some(true), shell: Some(shell.into()), activate, id: Some(id.into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: None, cols: 80, rows: 24, login: Some(true), shell_integration: Some(true), shell: Some(shell.into()), activate, hook_file: None, id: Some(id.into()) },
             "test",
             sink,
         )
@@ -523,7 +541,7 @@ mod tests {
             let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
                 let _ = tx.lock().unwrap().send(o);
             });
-            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, shell_integration: None, shell: None, activate: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
+            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, shell_integration: None, shell: None, activate: None, hook_file: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
             let mut text = Vec::new();
             let mut code = None;
             while let Ok(o) = rx.recv_timeout(Duration::from_secs(30)) {

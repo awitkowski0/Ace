@@ -1,0 +1,89 @@
+// Ace: Debug run of Gradle tasks. Passed with --init-script (generated per debug run, port baked in; never written into the project).
+//   - every JavaExec task gets a JDWP agent (server, suspend=n, 127.0.0.1:@PORT@) and -Dace.jdwp=@PORT@ (the marker Ace uses to find and stop the game JVM)
+//   - Exec tasks that launch a nested gradlew get `--init-script <this file>` appended, so the nested build's JavaExec gets the agent too
+//   - optional "Enhanced HotSwap": a JetBrains Runtime of the task's Java major + -XX:+AllowEnhancedClassRedefinition
+// Only tasks.configureEach hooks are used: no task is realized here (Loom throws exclusive-lock errors when tasks are realized early).
+import java.net.InetAddress
+import java.net.ServerSocket
+
+def acePort = '@PORT@'
+def aceSelf = '@SELF@'
+def aceJbrs = '@JBRS@'            // "21=/path/to/jbr21,25=/path/to/jbr25" or empty (Enhanced HotSwap off)
+def aceAgentJar = '@AGENT@'       // hotswap-agent-core.jar of the JBR, only when present
+def aceJdwp = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:${acePort}".toString()
+def aceJbrMap = [:]
+aceJbrs.split(',').each { String kv -> def i = kv.indexOf('='); if (i > 0) aceJbrMap[kv.substring(0, i).trim()] = kv.substring(i + 1).trim() }
+
+def acePortFree = {
+  try { new ServerSocket(Integer.parseInt(acePort), 1, InetAddress.getByName('127.0.0.1')).close(); return true } catch (Throwable ignore) { return false }
+}
+
+allprojects { Project p ->
+  p.tasks.withType(JavaExec).configureEach { JavaExec t ->
+    t.jvmArgs(aceJdwp, "-Dace.jdwp=${acePort}".toString())
+    t.doFirst {
+      // the JBR-only flags go in only when the task really runs on a JetBrains Runtime (a stock JVM refuses -XX:+AllowEnhancedClassRedefinition)
+      if (!aceJbrMap.isEmpty()) {
+        def isJbr = false
+        try {
+          if (t.javaLauncher.isPresent()) isJbr = t.javaLauncher.get().metadata.vendor.toString().contains('JetBrains')
+          else isJbr = aceJbrMap.values().any { (t.executable as String).startsWith(new File(it).canonicalPath) }
+        } catch (Throwable ignore) {}
+        if (isJbr) {
+          t.jvmArgs('-XX:+AllowEnhancedClassRedefinition')
+          if (!aceAgentJar.isEmpty()) t.jvmArgs('-XX:HotswapAgent=core')
+        }
+      }
+      // another JVM of this run (a parallel JavaExec) may hold the port: running without the agent beats "Address already in use"
+      if (!acePortFree()) {
+        t.jvmArgs = t.jvmArgs.findAll { !(it instanceof String) || !it.startsWith('-agentlib:jdwp=') }
+      }
+    }
+  }
+  p.tasks.withType(Exec).configureEach { Exec t ->
+    t.doFirst {
+      def cl = t.commandLine
+      if (cl == null || cl.isEmpty()) return
+      def exe = cl[0].toString()
+      def name = exe.substring(exe.lastIndexOf('/') + 1)
+      if ((name == 'gradlew' || name == 'gradlew.bat' || name == 'gradle') && !cl.any { it.toString() == aceSelf }) {
+        // nested Gradle build: the same init script (+ the JBR search path), so ITS JavaExec tasks get the agent too.
+        // Global options go right after the executable, before the task names.
+        def extra = ['--init-script', aceSelf]
+        if (!aceJbrMap.isEmpty()) extra << ('-Dorg.gradle.java.installations.paths=' + aceJbrMap.values().join(',')).toString()
+        t.commandLine([cl[0]] + extra + cl.drop(1))
+      }
+    }
+  }
+}
+
+// Enhanced HotSwap launcher: registered after every project has been evaluated (build scripts and their hooks), so a launcher the build sets itself does
+// not win over it. Still only a configureEach registration: tasks that are not realized yet stay unrealized.
+if (!aceJbrMap.isEmpty()) {
+  gradle.projectsEvaluated { Gradle g ->
+    g.allprojects { Project p ->
+      p.tasks.withType(JavaExec).configureEach { JavaExec t ->
+        def toolchains = p.extensions.findByName('javaToolchains')
+        def javaExt = p.extensions.findByName('java')
+        if (toolchains != null) {
+          // lazily: the Java major of the project's toolchain, else the JVM Gradle runs on
+          t.javaLauncher.set(p.provider {
+            def major = null
+            try { major = javaExt?.toolchain?.languageVersion?.getOrNull()?.asInt()?.toString() } catch (Throwable ignore) {}
+            if (major == null) major = JavaVersion.current().majorVersion
+            def jbr = aceJbrMap[major]
+            if (jbr == null) {
+              p.logger.warn("Ace: no JetBrains Runtime ${major} is installed: Enhanced HotSwap is off for ${t.path}")
+              return javaExt != null ? toolchains.launcherFor(javaExt.toolchain).get() : null
+            }
+            def spec = { s -> s.languageVersion.set(JavaLanguageVersion.of(major as int)); s.vendor.set(JvmVendorSpec.matching('JetBrains')) }
+            p.logger.lifecycle("Ace: ${t.path} runs on the JetBrains Runtime ${major} (${jbr})")
+            return toolchains.launcherFor(spec).get()
+          })
+        } else {
+          t.executable = aceJbrMap.values().first() + '/bin/java'
+        }
+      }
+    }
+  }
+}

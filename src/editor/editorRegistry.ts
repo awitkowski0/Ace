@@ -18,7 +18,10 @@ export const registerEditor = (groupId: string, e: editor.IStandaloneCodeEditor)
 };
 export const unregisterEditor = (groupId: string) => editors.delete(groupId);
 export const setActiveEditorGroup = (id: string) => (activeGroupId = id);
-export const activeEditor = () => (activeGroupId ? editors.get(activeGroupId) : undefined) ?? [...editors.values()][0];
+/** Set by EditorArea: true while the active group shows a viewer tab (image, audio ...), whose hidden Monaco must not receive editor actions. */
+let viewerInFront: () => boolean = () => false;
+export const setViewerInFront = (f: () => boolean) => { viewerInFront = f; };
+export const activeEditor = () => (viewerInFront() ? undefined : (activeGroupId ? editors.get(activeGroupId) : undefined) ?? [...editors.values()][0]);
 export const focusEditor = () => activeEditor()?.focus();
 /** Run a Monaco built-in command on the active editor (e.g. "editor.action.deleteLines"). */
 export const triggerEditor = (id: string) => {

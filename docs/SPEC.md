@@ -43,12 +43,13 @@ The editor, file tree, search, terminal and Claude panel all take a Location so 
      open in a terminal tab; remote ones run via `ssh -t mc 'bash -lc "cd <dir> && claude --resume <id>"'`
      (claude is not on non-login PATH on mc — always use a login shell).
    - Sessions view auto-refreshes; badges for currently-running sessions.
+  - AI Sessions is the 2nd view of the Project window; ⌃⌥A flips Files <-> AI; "Claude finished / needs input" notifications: docs/AI-SESSIONS.md.
 9. Keymap = IntelliJ "Mac OS X 10.5+" plus Alex's overrides from
    ~/Library/Application Support/JetBrains/IntelliJIdea2025.1/keymaps/macOS copy.xml
    (RenameElement: shift F6 and `p`; only the first is applied in-editor, `p` only when editor not focused).
    Keymap is data: `src/keymap/intellij-macos.json` (actionId -> shortcuts), mapped to Atelier
    actions via a registry. Unmapped IntelliJ actions are ignored. Settings UI can rebind.
-10. Tool window layout like IntelliJ: left (Project ⌘1, Remote Files), right (Claude ⌃⌥C), bottom (Terminal, Find, Git,
+10. Tool window layout like IntelliJ: left (Project ⌘1 with its second view AI Sessions ⌃⌥C, Remote Files), bottom (Terminal, Find, Git,
     Problems ⌘6), stripes with toggles, resizable, state persisted per project.
 
 ## Module ownership (parallel agents must stay inside their files)

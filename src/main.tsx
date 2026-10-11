@@ -12,12 +12,14 @@ import { installDispatcher } from "./actions/dispatcher";
 import App from "./App";
 import { maybeInstallQa } from "./qa";
 import { installWindowLifecycle } from "./lib/windowLifecycle";
+import { initScheme } from "./theme";
 
 installDispatcher();
 installWindowLifecycle(); // close-requested prompt + native File menu actions
 void maybeInstallQa(); // no-op unless ATELIER_AUTOMATION=1 (see src/qa)
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+void initScheme().finally(() => // colour scheme (global preference) is applied before the first paint
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  ));

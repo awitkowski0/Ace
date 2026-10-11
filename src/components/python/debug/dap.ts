@@ -7,7 +7,21 @@ export type DapBody = Record<string, any>;
 
 interface Pending { resolve(b: DapBody): void; reject(e: Error): void; command: string; timer?: ReturnType<typeof setTimeout> }
 
-export class DapClient {
+/** What DebugSession needs from a debug-adapter client. The Godot shim (godot/dapShim.ts) implements it without any adapter process. */
+export interface DapLike {
+  readonly id: string;
+  closed: boolean;
+  readonly log: string[];
+  readonly trace: string[];
+  onEvent: (event: string, body: DapBody) => void;
+  onRequest: (command: string, args: DapBody) => Promise<DapBody | void>;
+  onClosed: () => void;
+  start(spec?: RunSpec): Promise<void>;
+  request<T = DapBody>(command: string, args?: DapBody, timeoutMs?: number): Promise<T>;
+  stop(): void;
+}
+
+export class DapClient implements DapLike {
   readonly id = newId("dap");
   closed = false;
   /** adapter stderr lines (last 300) */
@@ -21,7 +35,8 @@ export class DapClient {
   private pending = new Map<number, Pending>();
   private un: UnlistenFn[] = [];
 
-  async start(spec: RunSpec) {
+  async start(spec?: RunSpec) {
+    if (!spec) throw new Error("no adapter command");
     // subscribe BEFORE starting: the id is ours, so nothing the adapter prints can be missed
     this.un.push(await dapBridge.onMsg(this.id, (j) => this.recv(j)));
     this.un.push(await dapBridge.onLog(this.id, (l) => { this.log.push(l); if (this.log.length > 300) this.log.shift(); }));

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../../lib/store";
 import { editorStore, activeDocKey } from "../../editor/store";
 import { keysFor } from "../../actions/keymap";
@@ -7,7 +7,7 @@ import { runAction } from "../../actions/registry";
 import { ChevronDown } from "../shell/icons";
 import { DebugIcon, KebabIcon, RerunIcon, RunIcon, StopIcon } from "./icons";
 import { promoteConfig, runStore, selectConfig, typeOf } from "./configs";
-import { canStopAny, subscribeStop } from "./hooks";
+import { canStopAny, subscribeStop, subscribeWidgetItems, widgetItems } from "./hooks";
 import { rerunSession, sessionStore, sessions, startRun } from "./sessions";
 import type { RunConfig } from "./types";
 
@@ -26,6 +26,7 @@ export function RunWidget() {
   useStore(sessionStore);
   const stoppable = useSyncExternalStore(subscribeStop, canStopAny);
   const hasCtx = useHasContext();
+  const nItems = useSyncExternalStore(subscribeWidgetItems, () => widgetItems().length);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const sel = configs.find((c) => c.id === selectedId) ?? null;
   const running = sel ? sessions().find((s) => s.configId === sel.id && s.status !== "finished") : undefined;
@@ -37,14 +38,15 @@ export function RunWidget() {
         className={"widget run-cfg" + (sel ? "" : " empty")} data-act="config" data-name={sel?.name ?? ""} data-temp={sel?.temporary ? "1" : "0"}
         title={sel ? `Select run/debug configuration (⌃⌥R)` : "Add Configuration…"}
         onClick={(e) => {
-          if (!sel) return void runAction("EditRunConfigurations");
+          // nothing at all -> the dialog; any configuration or pinned item -> the dropdown (IntelliJ)
+          if (!sel && !configs.length && !nItems) return void runAction("EditRunConfigurations");
           const r = e.currentTarget.getBoundingClientRect();
           setMenu(menu ? null : { x: r.left, y: r.bottom + 2 });
         }}
       >
         <span className="run-cfg-icon">{sel ? typeOf(sel)?.icon : <RunIcon />}</span>
         <span className={"run-cfg-name" + (sel?.temporary ? " temp" : "")}>{name}</span>
-        {sel && <ChevronDown />}
+        {(sel || nItems > 0 || configs.length > 0) && <ChevronDown />}
       </button>
       <button className="icon-btn run-btn" data-act="run" disabled={!canRun}
         title={running ? `Rerun '${sel!.name}'${key("Rerun")}` : sel ? `Run '${sel.name}'${key("Run")}` : `Run${key("Run")}`}
@@ -71,7 +73,8 @@ function ConfigMenu({ x, y, configs, sel, onClose }: { x: number; y: number; con
   const ref = useRef<HTMLDivElement>(null);
   const [hi, setHi] = useState(Math.max(0, configs.findIndex((c) => c.id === sel?.id)));
   const count = configs.length;
-  const items: { label: string; run: () => void }[] = [];
+  useSyncExternalStore(subscribeWidgetItems, () => widgetItems().length);
+  const items: { label: string; run: () => void; id?: string; title?: string; pinned?: boolean }[] = widgetItems().map((w) => ({ label: w.label, run: w.select ?? w.run, id: w.id, title: w.title, pinned: true }));
   if (sel?.temporary) items.push({ label: `Save '${sel.name}' Configuration`, run: () => promoteConfig(sel.id) });
   items.push({ label: "Edit Configurations…", run: () => runAction("EditRunConfigurations") });
   useEffect(() => {
@@ -107,9 +110,12 @@ function ConfigMenu({ x, y, configs, sel, onClose }: { x: number; y: number; con
       ))}
       {count > 0 && <div className="menu-sep" />}
       {items.map((it, i) => (
-        <div key={it.label} className={"menu-item" + (count + i === hi ? " hi" : "")} onMouseEnter={() => setHi(count + i)} onClick={() => { onClose(); it.run(); }}>
+        <Fragment key={it.id ?? it.label}>
+        {it.pinned && (i === 0 || !items[i - 1].pinned) && <div className="menu-section" data-testid="run-menu-pinned">Pinned</div>}
+        <div data-widget-item={it.id} title={it.title} className={"menu-item" + (count + i === hi ? " hi" : "")} onMouseEnter={() => setHi(count + i)} onClick={() => { onClose(); it.run(); }}>
           <span>{it.label}</span>
         </div>
+        </Fragment>
       ))}
     </div>
   );

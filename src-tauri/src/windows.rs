@@ -666,6 +666,8 @@ pub fn cleanup_window(app: &AppHandle, label: &str) {
     crate::daemons::release_window(label);
     crate::runner::release_window(label);
     crate::dap::release_window(label);
+    crate::jdwp::release_window(label);
+    crate::godot::release_window(label);
     crate::remote::ssh::release_window(label);
 }
 
