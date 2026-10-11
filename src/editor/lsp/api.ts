@@ -14,6 +14,8 @@ export const lsp = {
   symbols: () => mgr().then((m) => m.documentSymbols()),
   codeActions: () => mgr().then((m) => m.codeActions()),
   retry: () => mgr().then((m) => m.retryNow()),
+  /** stop + start the sessions of a language (Python: interpreter changed / server installed). No-op until the manager is loaded. */
+  restartLanguage: (lang: string) => (booting ? mgr().then((m) => m.restartLanguage(lang)) : undefined),
 };
 
 export function activeDoc() {

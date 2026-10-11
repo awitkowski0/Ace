@@ -73,14 +73,19 @@ const diagRow = (d: Diag): Row => ({
 export function ProblemsPanel() {
   const { byUri } = useStore(diagStore);
   const { root } = useStore(projectStore);
+  const { servers } = useStore(statusStore);
   useStore(editorStore);
+  const sid = activeServerId();
+  const sst = sid ? servers[sid] : undefined;
   const [tab, setTab] = useState<"file" | "project">("file");
   const cur = activeDoc()?.loc.path;
-  const curDiags = cur ? (byUri[cur] ?? []) : [];
-  const total = useMemo(() => Object.values(byUri).reduce((n, l) => n + l.length, 0), [byUri]);
+  // hint-level results (grey "unnecessary code" fading) only decorate the editor; they are not problems
+  const shown = (l: Diag[]) => l.filter((d) => d.severity <= 3);
+  const curDiags = cur ? shown(byUri[cur] ?? []) : [];
+  const total = useMemo(() => Object.values(byUri).reduce((n, l) => n + shown(l).length, 0), [byUri]);
   const rows = useMemo<Row[]>(() => {
     if (tab === "file") return [...curDiags].sort(sortDiags).map(diagRow);
-    return Object.entries(byUri).sort(([a], [b]) => a.localeCompare(b)).flatMap(([p, l]) => [
+    return Object.entries(byUri).map(([p, l]) => [p, shown(l)] as const).filter(([, l]) => l.length).sort(([a], [b]) => a.localeCompare(b)).flatMap(([p, l]) => [
       { kind: "file", path: p, text: "", sub: relPath(p, root?.path), count: l.length } as Row,
       ...[...l].sort(sortDiags).map(diagRow),
     ]);
@@ -91,6 +96,12 @@ export function ProblemsPanel() {
         <span className={"lsp-tab" + (tab === "file" ? " active" : "")} onClick={() => setTab("file")}>Current File {curDiags.length || ""}</span>
         <span className={"lsp-tab" + (tab === "project" ? " active" : "")} onClick={() => setTab("project")}>Project Errors {total || ""}</span>
       </div>
+      {sst?.state === "unavailable" && sst.action && (
+        <div className="lsp-notice" data-testid="lsp-install-notice">
+          <span>{sst.hint}: no language server was found for {SERVER_LABEL[sid!] ?? sid}, so only linter results are shown.</span>
+          <button onClick={sst.action}>{sst.actionLabel ?? sst.hint}</button>
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0 }}>
         <List rows={rows} empty={tab === "file" ? "No problems found in the current file" : "No problems reported by language servers"} />
       </div>
@@ -143,6 +154,9 @@ export function InspectionWidget() {
       { label: "Show Problems", run: () => showToolWindow("problems") },
     ]);
   };
+  if (st?.state === "unavailable" && st.action) {
+    return <span className="sb-item sb-lsp warn" data-testid="lsp-install-hint" title={st.actionLabel ?? st.hint} onClick={st.action}>{st.hint}</span>;
+  }
   if (st?.state === "waiting") {
     return <span className="sb-item sb-lsp warn" title="Click for options" onClick={menu}>{st.hint}</span>;
   }

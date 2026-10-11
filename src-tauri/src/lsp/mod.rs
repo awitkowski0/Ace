@@ -291,12 +291,13 @@ const SPECS: &[Spec] = &[
     Spec { id: "rust-analyzer", label: "rust-analyzer", bin: "rust-analyzer", args: &[] },
     Spec { id: "typescript", label: "typescript-language-server", bin: "typescript-language-server", args: &["--stdio"] },
     Spec { id: "pyright", label: "pyright", bin: "pyright-langserver", args: &["--stdio"] },
+    Spec { id: "basedpyright", label: "basedpyright", bin: "basedpyright-langserver", args: &["--stdio"] },
     Spec { id: "gopls", label: "gopls", bin: "gopls", args: &[] },
     Spec { id: "jdtls", label: "jdtls", bin: "jdtls", args: &[] },
 ];
 
 /// PATH of the user's login shell (GUI apps start with a minimal PATH). Resolved once.
-fn login_path() -> &'static str {
+pub(crate) fn login_path() -> &'static str {
     static P: OnceLock<String> = OnceLock::new();
     P.get_or_init(|| {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
@@ -351,7 +352,7 @@ pub async fn lsp_detect() -> Vec<ServerInfo> {
     .unwrap_or_default()
 }
 
-fn read_loop<R: Read>(r: R, mut emit: impl FnMut(String)) {
+pub(crate) fn read_loop<R: Read>(r: R, mut emit: impl FnMut(String)) {
     let mut br = BufReader::new(r);
     loop {
         let mut len: Option<usize> = None;
@@ -378,7 +379,7 @@ fn read_loop<R: Read>(r: R, mut emit: impl FnMut(String)) {
     }
 }
 
-fn spawn_writer<W: Write + Send + 'static>(mut w: W) -> Sender<Vec<u8>> {
+pub(crate) fn spawn_writer<W: Write + Send + 'static>(mut w: W) -> Sender<Vec<u8>> {
     let (tx, rx) = channel::<Vec<u8>>();
     std::thread::spawn(move || {
         while let Ok(body) = rx.recv() {
@@ -413,7 +414,7 @@ fn connect_tcp(a: &str) -> Result<TcpStream, String> {
     Ok(s)
 }
 
-fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String, auto_godot: bool) -> Result<String, String> {
+fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String, auto_godot: bool, bin_override: Option<String>, path_prepend: Vec<String>) -> Result<String, String> {
     let spec = SPECS.iter().find(|s| s.id == server_id).ok_or_else(|| format!("unknown server {server_id}"))?;
     let st = app.state::<LspState>();
     let id = {
@@ -461,9 +462,13 @@ fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String
         });
         return Ok(id);
     }
-    let bin = which(spec.bin).ok_or_else(|| format!("{} not found on PATH", spec.bin))?;
+    let bin = match bin_override.as_deref().filter(|b| std::path::Path::new(b).is_file()) {
+        Some(b) => PathBuf::from(b),
+        None => which(spec.bin).ok_or_else(|| format!("{} not found on PATH", spec.bin))?,
+    };
     let mut cmd = Command::new(bin);
-    cmd.args(spec.args).env("PATH", login_path()).current_dir(&root);
+    let path = path_prepend.iter().map(|p| format!("{p}:")).collect::<String>() + login_path();
+    cmd.args(spec.args).env("PATH", path).current_dir(&root);
     if spec.id == "jdtls" {
         let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("atelier/jdtls").join(format!("{:x}", root.bytes().fold(5381u64, |h, b| h.wrapping_mul(33) ^ b as u64)));
         cmd.arg("-data").arg(dir);
@@ -484,9 +489,9 @@ fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String
 }
 
 #[tauri::command]
-pub async fn lsp_start(app: AppHandle, window: WebviewWindow, server_id: String, root: String, auto_godot: Option<bool>) -> Result<String, String> {
+pub async fn lsp_start(app: AppHandle, window: WebviewWindow, server_id: String, root: String, auto_godot: Option<bool>, bin: Option<String>, path_prepend: Option<Vec<String>>) -> Result<String, String> {
     let owner = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || start_blocking(app, owner, server_id, root, auto_godot.unwrap_or(false))).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || start_blocking(app, owner, server_id, root, auto_godot.unwrap_or(false), bin, path_prepend.unwrap_or_default())).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

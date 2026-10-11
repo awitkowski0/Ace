@@ -10,6 +10,7 @@ import { projectStore } from "../../lib/project";
 import { openFile } from "../../editor/store";
 import { confirmDialog } from "../shell/dialogs";
 import { pty } from "./pty";
+import { terminalActivate } from "./activator";
 import { openExternal } from "./external";
 import { base64ToUtf8, clipboardRead, clipboardWrite, isUnsafePaste, utf8ToBase64 } from "./clipboard";
 import { filePathLinks } from "./links";
@@ -191,9 +192,15 @@ export class Pane {
     this.unlisten.push(un1, un2);
     if (this.disposed) return this.unlistenAll();
     try {
+      let activate = getSettings().shellIntegration ? terminalActivate({ host: this.host, cwd: this.startCwd, command: this.command }) : undefined;
+      if (activate instanceof Promise) {
+        activate = await activate;
+        if (this.disposed) return this.unlistenAll();
+      }
       await pty.spawn({
         host: this.host, cwd: this.startCwd, command: this.command, login: this.login,
         cols: this.term.cols, rows: this.term.rows, id: this.id, shellIntegration: getSettings().shellIntegration,
+        activate,
       });
     } catch (e) {
       this.exited = true;

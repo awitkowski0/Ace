@@ -3,7 +3,8 @@ import { projectName, projectStore } from "../../lib/project";
 import { shellStore } from "../../lib/shell";
 import { openPopup } from "./popups";
 import { runAction } from "../../actions/registry";
-import { BranchIcon, ChevronDown, FolderIcon, GearIcon, PlayIcon, SearchIcon } from "./icons";
+import { BranchIcon, ChevronDown, GearIcon, SearchIcon } from "./icons";
+import { RunWidget } from "../run/Widget";
 import { keysFor } from "../../actions/keymap";
 import { formatKeystroke } from "../../actions/keystroke";
 
@@ -26,7 +27,7 @@ export function Toolbar() {
       </button>
       <div className="grow" data-tauri-drag-region />
       <div id="run-widget-slot" className="widget-slot">
-        <button className="widget dim" disabled><PlayIcon /><span>Add Configuration…</span></button>
+        <RunWidget />
       </div>
       <button className="icon-btn" title={`Search Everywhere${key ? " " + formatKeystroke(key) : ""}`} onClick={() => runAction("SearchEverywhere")}><SearchIcon /></button>
       <button className="icon-btn" title="Settings"><GearIcon /></button>

@@ -10,8 +10,8 @@ import { activeEditor } from "../editorRegistry";
 import { promptDialog } from "../../components/shell/dialogs";
 import { showToolWindow } from "../../lib/layout";
 import { LspClient, type Json, type Pos, type Rng } from "./client";
-import { LANGUAGE_ID_FOR, ROOT_MARKERS, SERVER_FOR_LANGUAGE } from "./servers";
-import { diagStore, lspSettings, pathToUri, setServerStatus, uriToPath, usagesStore, type Diag } from "./state";
+import { LANGUAGE_ID_FOR, ROOT_MARKERS, SERVER_FOR_LANGUAGE, intentionProviderList, launchResolver, type Launch } from "./servers";
+import { DIAG_OWNERS, diagStore, getSourceDiags, lspSettings, pathToUri, setServerStatus, setSourceDiags, uriToPath, usagesStore, type Diag } from "./state";
 import { openAt } from "./navigate";
 import { applyWorkspaceEdit } from "./edits";
 
@@ -21,7 +21,12 @@ const RETRY_MIN = 3000, RETRY_MAX = 60000;
 
 interface Ctx {
   key: string;
+  /** Rust SPEC id of the server actually running (python: basedpyright | pyright) */
   serverId: string;
+  /** key of the status entry / widget (SERVER_FOR_LANGUAGE[language]) */
+  statusId: string;
+  lang: string;
+  launch?: Launch;
   rootPath: string;
   client?: LspClient;
   starting?: boolean;
@@ -100,16 +105,19 @@ async function resolveRoot(serverId: string, path: string): Promise<string> {
 
 async function track(model: Model) {
   if (tracked.has(model) || model.uri.scheme !== "file") return;
-  const serverId = SERVER_FOR_LANGUAGE[model.getLanguageId()];
+  const lang = model.getLanguageId();
+  const serverId = SERVER_FOR_LANGUAGE[lang];
   const proj = projectStore.get().root;
   if (!serverId || !proj || proj.host !== "local") return; // remote roots: LSP disabled for v1
-  const avail = await detectServers();
-  if (avail[serverId] === false) { setServerStatus(serverId, { state: "unavailable" }); return; }
+  if (!launchResolver(lang)) {
+    const avail = await detectServers();
+    if (avail[serverId] === false) { setServerStatus(serverId, { state: "unavailable" }); return; }
+  }
   const rootPath = await resolveRoot(serverId, model.uri.path);
   if (tracked.has(model) || model.isDisposed()) return;
   const key = serverId + "|" + rootPath;
   let ctx = ctxs.get(key);
-  if (!ctx) ctxs.set(key, (ctx = { key, serverId, rootPath, models: new Set(), retryDelay: RETRY_MIN, diagPaths: new Set(), tokens: new Map() }));
+  if (!ctx) ctxs.set(key, (ctx = { key, serverId, statusId: serverId, lang, rootPath, models: new Set(), retryDelay: RETRY_MIN, diagPaths: new Set(), tokens: new Map() }));
   const t: Tracked = { ctx, sent: false, path: model.uri.path, sub: model.onDidChangeContent((e) => onChange(model, t, e)) };
   tracked.set(model, t);
   ctx.models.add(model);
@@ -125,6 +133,7 @@ function untrack(model: Model) {
   t.sub.dispose();
   tracked.delete(model);
   t.ctx.models.delete(model);
+  if (getSourceDiags("lsp", t.path).length) setSourceDiags("lsp", { [t.path]: [] }); // closed file: the server stops reporting it
   if (t.sent && t.ctx.client) t.ctx.client.notifyServer("textDocument/didClose", { textDocument: { uri: pathToUri(t.path) } });
   if (t.ctx.models.size === 0) {
     clearTimeout(t.ctx.retry);
@@ -140,7 +149,20 @@ function stopCtx(ctx: Ctx) {
   c?.shutdown();
   clearDiagnostics(ctx);
   ctxs.delete(ctx.key);
-  setServerStatus(ctx.serverId, { state: "idle" });
+  setServerStatus(ctx.statusId, { state: "idle" });
+}
+
+/** Stop and start again every session of `lang` (the Python interpreter changed, a server was installed ...). */
+export function restartLanguage(lang: string) {
+  const models: Model[] = [];
+  for (const ctx of [...ctxs.values()]) {
+    if (ctx.lang !== lang) continue;
+    models.push(...ctx.models);
+    for (const m of ctx.models) { const t = tracked.get(m); if (t) { t.sub.dispose(); tracked.delete(m); } }
+    ctx.models.clear();
+    stopCtx(ctx);
+  }
+  for (const m of models) if (!m.isDisposed()) void track(m);
 }
 
 function sendOpen(ctx: Ctx, model: Model, t: Tracked) {
@@ -168,10 +190,20 @@ function onChange(model: Model, t: Tracked, e: monaco.editor.IModelContentChange
 async function startServer(ctx: Ctx) {
   if (ctx.starting || ctx.client) return;
   ctx.starting = true;
-  setServerStatus(ctx.serverId, { state: "starting" });
+  setServerStatus(ctx.statusId, { state: "starting" });
   let client: LspClient | undefined;
   try {
-    const sessionId = await invoke<string>("lsp_start", { serverId: ctx.serverId, root: ctx.rootPath, autoGodot: lspSettings.get().autoGodot });
+    const resolver = launchResolver(ctx.lang);
+    if (resolver) {
+      const l = await resolver(ctx.rootPath);
+      if (!l) { ctx.starting = false; return; } // no server: the resolver published the status (hint / action)
+      ctx.launch = l;
+      ctx.serverId = l.serverId;
+    }
+    const sessionId = await invoke<string>("lsp_start", {
+      serverId: ctx.serverId, root: ctx.rootPath, autoGodot: lspSettings.get().autoGodot,
+      bin: ctx.launch?.bin ?? null, pathPrepend: ctx.launch?.pathPrepend ?? null,
+    });
     client = new LspClient(sessionId);
     await client.attach();
     wire(ctx, client);
@@ -180,14 +212,14 @@ async function startServer(ctx: Ctx) {
       ctx.client = undefined;
       for (const m of ctx.models) { const t = tracked.get(m); if (t) t.sent = false; }
       clearDiagnostics(ctx);
-      setServerStatus(ctx.serverId, { state: "idle" });
+      setServerStatus(ctx.statusId, { state: "idle" });
       if (ctx.models.size) scheduleRetry(ctx);
     };
     await client.initialize(ctx.rootPath, pathToUri(ctx.rootPath), ctx.rootPath.split("/").pop() ?? "root");
     if (ctx.models.size === 0 && !ctxs.has(ctx.key)) { client.stop(); return; }
     ctx.client = client;
     ctx.retryDelay = RETRY_MIN;
-    setServerStatus(ctx.serverId, { state: "ready" });
+    setServerStatus(ctx.statusId, { state: "ready" });
     if (ctx.serverId === "typescript") disableBuiltinTs();
     for (const m of ctx.models) { const t = tracked.get(m); if (t && !t.sent) sendOpen(ctx, m, t); }
   } catch (e) {
@@ -196,7 +228,7 @@ async function startServer(ctx: Ctx) {
     if (ctx.serverId === "godot") {
       setServerStatus("godot", { state: "waiting", hint: "Start Godot editor for GDScript intelligence" });
     } else {
-      setServerStatus(ctx.serverId, { state: "error", hint: String(e) });
+      setServerStatus(ctx.statusId, { state: "error", hint: String(e) });
     }
     if (ctx.models.size) scheduleRetry(ctx);
   } finally {
@@ -217,7 +249,7 @@ export function retryNow() {
 
 function wire(ctx: Ctx, c: LspClient) {
   c.onNotification("textDocument/publishDiagnostics", (p) => publish(ctx, p));
-  c.onRequest("workspace/configuration", (p) => (p.items ?? []).map(() => null));
+  c.onRequest("workspace/configuration", (p) => (p.items ?? []).map((it: Json) => (ctx.launch?.settings ? (ctx.launch.settings(it.section, it.scopeUri) ?? null) : null)));
   c.onRequest("client/registerCapability", () => null);
   c.onRequest("client/unregisterCapability", () => null);
   c.onRequest("window/workDoneProgress/create", () => null);
@@ -234,7 +266,7 @@ function wire(ctx: Ctx, c: LspClient) {
     if (v?.kind !== "report" || now - last > 250) {
       last = now;
       const title = [...ctx.tokens.values()].pop();
-      setServerStatus(ctx.serverId, { state: "ready", progress: title ? `${title}${v?.message ? " " + v.message : ""}` : undefined });
+      setServerStatus(ctx.statusId, { state: "ready", progress: title ? `${title}${v?.message ? " " + v.message : ""}` : undefined });
     }
   });
 }
@@ -260,6 +292,7 @@ function publish(ctx: Ctx, p: Json) {
   const path = uriToPath(p.uri);
   const diags: Diag[] = (p.diagnostics ?? []).map((d: Json) => ({
     uri: path, range: d.range, severity: d.severity ?? 1, message: d.message, source: d.source, code: typeof d.code === "object" ? d.code?.value : d.code,
+    tags: d.tags, owner: "lsp",
   }));
   ctx.diagPaths.add(path);
   pending[path] = diags;
@@ -269,30 +302,29 @@ function flush() {
   flushT = undefined;
   const batch = pending;
   pending = {};
-  diagStore.set((s) => {
-    const byUri = { ...s.byUri };
-    for (const [k, v] of Object.entries(batch)) { if (v.length) byUri[k] = v; else delete byUri[k]; }
-    return { byUri, rev: s.rev + 1 };
-  });
+  setSourceDiags("lsp", batch);
   for (const k of Object.keys(batch)) {
     const m = monaco.editor.getModel(monaco.Uri.file(k));
     if (m) applyMarkers(m);
   }
 }
 function clearDiagnostics(ctx: Ctx) {
-  diagStore.set((s) => {
-    const byUri = { ...s.byUri };
-    for (const p of ctx.diagPaths) { delete byUri[p]; const m = monaco.editor.getModel(monaco.Uri.file(p)); if (m) monaco.editor.setModelMarkers(m, "lsp", []); }
-    return { byUri, rev: s.rev + 1 };
-  });
+  const batch: Record<string, Diag[]> = {};
+  for (const p of ctx.diagPaths) { batch[p] = []; const m = monaco.editor.getModel(monaco.Uri.file(p)); if (m) monaco.editor.setModelMarkers(m, "lsp", []); }
+  if (ctx.diagPaths.size) setSourceDiags("lsp", batch);
   ctx.diagPaths.clear();
 }
 const SEV = { 1: monaco.MarkerSeverity.Error, 2: monaco.MarkerSeverity.Warning, 3: monaco.MarkerSeverity.Info, 4: monaco.MarkerSeverity.Hint } as const;
-function applyMarkers(model: Model) {
-  const ds = diagStore.get().byUri[model.uri.path] ?? [];
-  monaco.editor.setModelMarkers(model, "lsp", ds.map((d) => ({
-    ...toRange(d.range), severity: SEV[d.severity] ?? 8, message: d.message, source: d.source, code: d.code !== undefined ? String(d.code) : undefined,
-  })));
+/** Each producer (lsp, ruff) has its own marker owner so one never clobbers the other. The merged list (diagStore) feeds Problems. */
+export function applyMarkers(model: Model) {
+  const merged = diagStore.get().byUri[model.uri.path] ?? [];
+  for (const owner of DIAG_OWNERS) {
+    const ds = merged.filter((d) => (d.owner ?? "lsp") === owner);
+    monaco.editor.setModelMarkers(model, owner, ds.map((d) => ({
+      ...toRange(d.range), severity: SEV[d.severity] ?? 8, message: d.message, source: d.source, code: d.code !== undefined ? String(d.code) : undefined,
+      tags: d.tags?.map((t) => (t === 1 ? monaco.MarkerTag.Unnecessary : monaco.MarkerTag.Deprecated)),
+    })));
+  }
 }
 
 // ---------- request helpers ----------
@@ -315,55 +347,58 @@ const CK = [KIND.Text, KIND.Text, KIND.Method, KIND.Function, KIND.Constructor, 
 
 type Item = monaco.languages.CompletionItem & { _raw?: Json; _model?: Model };
 
+async function hoverAt(model: Model, pos: monaco.IPosition): Promise<monaco.languages.Hover | null> {
+  const r = await req<Json>(model, "textDocument/hover", { textDocument: tdoc(model), position: toPos(pos) });
+  const contents = md(r?.contents);
+  return contents.length ? { contents, range: r.range ? toRange(r.range) : undefined } : null;
+}
+async function completionAt(model: Model, position: monaco.IPosition, context: { triggerKind: number; triggerCharacter?: string }): Promise<monaco.languages.CompletionList> {
+  const L = monaco.languages;
+  const w = model.getWordUntilPosition(position);
+  const def = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn };
+  const r = await req<Json>(model, "textDocument/completion", {
+    textDocument: tdoc(model), position: toPos(position),
+    context: { triggerKind: context.triggerKind + 1, triggerCharacter: context.triggerCharacter },
+  });
+  if (!r) return { suggestions: [] };
+  const list: Json[] = Array.isArray(r) ? r : (r.items ?? []);
+  const suggestions: Item[] = list.map((it) => {
+    const te = it.textEdit;
+    let range: monaco.IRange | { insert: monaco.IRange; replace: monaco.IRange } = def;
+    if (te) {
+      if (te.range && te.range.start.line === te.range.end.line) range = toRange(te.range);
+      else if (te.insert && te.replace && te.replace.start.line === te.replace.end.line) range = { insert: toRange(te.insert), replace: toRange(te.replace) };
+    }
+    return {
+      label: it.label, kind: CK[it.kind ?? 1] ?? KIND.Text, detail: it.detail, documentation: docToMonaco(it.documentation),
+      sortText: it.sortText, filterText: it.filterText, insertText: te?.newText ?? it.insertText ?? it.label, range,
+      insertTextRules: it.insertTextFormat === 2 ? L.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+      additionalTextEdits: it.additionalTextEdits?.map((e: Json) => ({ range: toRange(e.range), text: e.newText })),
+      commitCharacters: it.commitCharacters, tags: it.deprecated || it.tags?.includes(1) ? [1] : undefined, preselect: it.preselect,
+      _raw: it, _model: model,
+    };
+  });
+  return { suggestions, incomplete: !Array.isArray(r) && !!r.isIncomplete };
+}
+async function resolveItem(item: Item): Promise<Item> {
+  const c = item._model && clientFor(item._model);
+  if (!c || !c.caps.completionProvider?.resolveProvider || !item._raw) return item;
+  try {
+    const r = await c.request<Json>("completionItem/resolve", item._raw, 3000);
+    if (r?.documentation) item.documentation = docToMonaco(r.documentation);
+    if (r?.detail) item.detail = r.detail;
+    if (r?.additionalTextEdits) item.additionalTextEdits = r.additionalTextEdits.map((e: Json) => ({ range: toRange(e.range), text: e.newText }));
+  } catch { /* keep */ }
+  return item;
+}
+
 function registerProviders(lang: string) {
   const L = monaco.languages;
-  L.registerHoverProvider(lang, {
-    async provideHover(model, pos) {
-      const r = await req<Json>(model, "textDocument/hover", { textDocument: tdoc(model), position: toPos(pos) });
-      const contents = md(r?.contents);
-      return contents.length ? { contents, range: r.range ? toRange(r.range) : undefined } : null;
-    },
-  });
+  L.registerHoverProvider(lang, { provideHover: (model, pos) => hoverAt(model, pos) });
   L.registerCompletionItemProvider(lang, {
     triggerCharacters: [".", ":", "$", "@", '"', "'", "/", "<", "#", ">"],
-    async provideCompletionItems(model, position, context) {
-      const w = model.getWordUntilPosition(position);
-      const def = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn };
-      const r = await req<Json>(model, "textDocument/completion", {
-        textDocument: tdoc(model), position: toPos(position),
-        context: { triggerKind: context.triggerKind + 1, triggerCharacter: context.triggerCharacter },
-      });
-      if (!r) return { suggestions: [] };
-      const list: Json[] = Array.isArray(r) ? r : (r.items ?? []);
-      const suggestions: Item[] = list.map((it) => {
-        const te = it.textEdit;
-        let range: monaco.IRange | { insert: monaco.IRange; replace: monaco.IRange } = def;
-        if (te) {
-          if (te.range && te.range.start.line === te.range.end.line) range = toRange(te.range);
-          else if (te.insert && te.replace && te.replace.start.line === te.replace.end.line) range = { insert: toRange(te.insert), replace: toRange(te.replace) };
-        }
-        return {
-          label: it.label, kind: CK[it.kind ?? 1] ?? KIND.Text, detail: it.detail, documentation: docToMonaco(it.documentation),
-          sortText: it.sortText, filterText: it.filterText, insertText: te?.newText ?? it.insertText ?? it.label, range,
-          insertTextRules: it.insertTextFormat === 2 ? L.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
-          additionalTextEdits: it.additionalTextEdits?.map((e: Json) => ({ range: toRange(e.range), text: e.newText })),
-          commitCharacters: it.commitCharacters, tags: it.deprecated || it.tags?.includes(1) ? [1] : undefined, preselect: it.preselect,
-          _raw: it, _model: model,
-        };
-      });
-      return { suggestions, incomplete: !Array.isArray(r) && !!r.isIncomplete };
-    },
-    async resolveCompletionItem(item: Item) {
-      const c = item._model && clientFor(item._model);
-      if (!c || !c.caps.completionProvider?.resolveProvider || !item._raw) return item;
-      try {
-        const r = await c.request<Json>("completionItem/resolve", item._raw, 3000);
-        if (r?.documentation) item.documentation = docToMonaco(r.documentation);
-        if (r?.detail) item.detail = r.detail;
-        if (r?.additionalTextEdits) item.additionalTextEdits = r.additionalTextEdits.map((e: Json) => ({ range: toRange(e.range), text: e.newText }));
-      } catch { /* keep */ }
-      return item;
-    },
+    provideCompletionItems: (model, position, context) => completionAt(model, position, context),
+    resolveCompletionItem: (item: Item) => resolveItem(item),
   });
   L.registerSignatureHelpProvider(lang, {
     signatureHelpTriggerCharacters: ["(", ","],
@@ -394,6 +429,7 @@ function registerProviders(lang: string) {
   const fmtOpts = (m: Model) => ({ tabSize: m.getOptions().tabSize, insertSpaces: m.getOptions().insertSpaces });
   const toEdits = (r: Json): monaco.languages.TextEdit[] | undefined =>
     Array.isArray(r) ? r.map((e: Json) => ({ range: toRange(e.range), text: e.newText })) : undefined;
+  if (lang === "python") return; // formatting for Python is ruff / black (python/lang), not the type checker
   L.registerDocumentFormattingEditProvider(lang, {
     async provideDocumentFormattingEdits(model) {
       const c = clientFor(model);
@@ -488,8 +524,17 @@ export async function renameSymbol() {
   }
   const name = await promptDialog({ title: "Rename", initial, okLabel: "Refactor" });
   if (!name || name === initial) return;
-  const edit = await req<Json>(c.model, "textDocument/rename", { textDocument: tdoc(c.model), position: toPos(c.pos), newName: name });
-  if (edit) await applyWorkspaceEdit(edit);
+  await renameTo(c.model, c.pos, name);
+}
+async function renameTo(model: Model, pos: monaco.IPosition, name: string): Promise<boolean> {
+  const client = clientFor(model);
+  if (!client) return false;
+  const edit = await req<Json>(model, "textDocument/rename", { textDocument: tdoc(model), position: toPos(pos), newName: name });
+  if (!edit) return false;
+  const written = await applyWorkspaceEdit(edit);
+  // files edited on disk (not open in Monaco): tell the server so its view of them is not stale
+  if (written.length) client.notifyServer("workspace/didChangeWatchedFiles", { changes: written.map((p) => ({ uri: pathToUri(p), type: 2 })) });
+  return true;
 }
 
 export interface SymbolRow { name: string; kind: number; detail?: string; line: number; col: number; depth: number }
@@ -515,9 +560,10 @@ export async function codeActions(): Promise<Intention[]> {
   const c = cursor();
   if (!c) return [];
   const client = clientFor(c.model);
-  if (!client || !caps(client, "codeActionProvider")) return [];
   const sel = c.ed.getSelection();
   const range = sel ? fromRange(sel) : { start: toPos(c.pos), end: toPos(c.pos) };
+  const extras: Intention[] = intentionProviderList().flatMap((p) => p({ path: c.model.uri.path, range, language: c.model.getLanguageId() })).map((e) => ({ title: e.title, run: async () => { await e.run(); } }));
+  if (!client || !caps(client, "codeActionProvider")) return extras;
   const ds = (diagStore.get().byUri[c.model.uri.path] ?? []).filter(
     (d) => d.range.start.line <= range.end.line && d.range.end.line >= range.start.line &&
       (d.range.start.line !== range.end.line || d.range.start.character <= range.end.character) &&
@@ -527,7 +573,7 @@ export async function codeActions(): Promise<Intention[]> {
     textDocument: tdoc(c.model), range,
     context: { diagnostics: ds.map((d) => ({ range: d.range, severity: d.severity, message: d.message, source: d.source, code: d.code })) },
   });
-  return (r ?? []).filter((a) => !a.disabled).map((a) => ({
+  const lspActions = (r ?? []).filter((a) => !a.disabled).map((a) => ({
     title: a.title,
     run: async () => {
       let act = a;
@@ -537,6 +583,7 @@ export async function codeActions(): Promise<Intention[]> {
       if (cmd?.command) await client.request("workspace/executeCommand", { command: cmd.command, arguments: cmd.arguments });
     },
   }));
+  return [...extras, ...lspActions];
 }
 
 // ---------- boot ----------
@@ -576,3 +623,45 @@ export function boot() {
     }
   });
 }
+
+/** LSP formatting of a whole document (used when neither ruff nor black exists). */
+export async function formatViaLsp(model: Model): Promise<{ range: monaco.IRange; text: string }[] | undefined> {
+  const c = clientFor(model);
+  if (!c || !caps(c, "documentFormattingProvider")) return undefined;
+  const r = await req<Json>(model, "textDocument/formatting", { textDocument: tdoc(model), options: { tabSize: model.getOptions().tabSize, insertSpaces: model.getOptions().insertSpaces } });
+  return Array.isArray(r) ? r.map((e: Json) => ({ range: toRange(e.range), text: e.newText })) : undefined;
+}
+
+/** Test hooks (python/lang/qa): the same code paths the Monaco providers use. */
+const modelAt = (path: string) => { const m = monaco.editor.getModel(monaco.Uri.file(path)); if (!m) throw new Error("model not open: " + path); return m; };
+export const qaHooks = {
+  sessions: () => [...ctxs.values()].map((c) => ({ key: c.key, serverId: c.serverId, bin: c.launch?.bin ?? null, ready: !!c.client, models: c.models.size })),
+  async completion(path: string, line: number, col: number, trigger?: string) {
+    const r = await completionAt(modelAt(path), { lineNumber: line, column: col }, { triggerKind: trigger ? 1 : 0, triggerCharacter: trigger });
+    return r.suggestions.map((s) => ({ label: typeof s.label === "string" ? s.label : s.label.label, detail: s.detail ?? null, insert: s.insertText }));
+  },
+  async hover(path: string, line: number, col: number) {
+    const h = await hoverAt(modelAt(path), { lineNumber: line, column: col });
+    return h ? h.contents.map((c) => ("value" in c ? c.value : "")).join("\n---\n") : null;
+  },
+  async definition(path: string, line: number, col: number) {
+    return (await definitionAt(modelAt(path), { lineNumber: line, column: col })).map((t) => ({ path: t.path, line: t.sel.start.line + 1, col: t.sel.start.character + 1 }));
+  },
+  async references(path: string, line: number, col: number) {
+    const r = await req<Json>(modelAt(path), "textDocument/references", { textDocument: tdoc(modelAt(path)), position: { line: line - 1, character: col - 1 }, context: { includeDeclaration: true } });
+    return normLocs(r).map((t) => ({ path: t.path, line: t.sel.start.line + 1 }));
+  },
+  async signature(path: string, line: number, col: number) {
+    const r = await req<Json>(modelAt(path), "textDocument/signatureHelp", { textDocument: tdoc(modelAt(path)), position: { line: line - 1, character: col - 1 } });
+    return r?.signatures?.map((s: Json) => ({ label: s.label, active: r.activeParameter ?? s.activeParameter ?? 0 })) ?? null;
+  },
+  async rename(path: string, line: number, col: number, name: string) { return renameTo(modelAt(path), { lineNumber: line, column: col }, name); },
+  async symbols(path: string) {
+    const m = modelAt(path);
+    const r = await req<Json[]>(m, "textDocument/documentSymbol", { textDocument: tdoc(m) });
+    const out: { name: string; kind: number; line: number; depth: number }[] = [];
+    const walk = (s: Json, depth: number) => { out.push({ name: s.name, kind: s.kind, line: (s.selectionRange ?? s.location?.range ?? s.range).start.line + 1, depth }); (s.children ?? []).forEach((ch: Json) => walk(ch, depth + 1)); };
+    (r ?? []).forEach((s) => walk(s, 0));
+    return out;
+  },
+};

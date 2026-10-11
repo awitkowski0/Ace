@@ -32,6 +32,7 @@ libc = "0.2.190"
 tauri-plugin-opener = "2.7.0"
 tauri-plugin-single-instance = "2.5.2"
 tauri-plugin-notification = "2.5.1"
+ureq = "2"
 
 [profile.release]
 lto = true

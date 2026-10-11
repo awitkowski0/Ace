@@ -4,7 +4,18 @@ import type { editor } from "monaco-editor";
 const editors = new Map<string, editor.IStandaloneCodeEditor>();
 let activeGroupId: string | null = null;
 
-export const registerEditor = (groupId: string, e: editor.IStandaloneCodeEditor) => editors.set(groupId, e);
+const editorListeners = new Set<(e: editor.IStandaloneCodeEditor) => void>();
+/** Called for every editor already registered and every one registered later (Python gutter, decorations). */
+export const onEditorRegistered = (cb: (e: editor.IStandaloneCodeEditor) => void) => {
+  editorListeners.add(cb);
+  editors.forEach((e) => cb(e));
+  return () => editorListeners.delete(cb);
+};
+export const registerEditor = (groupId: string, e: editor.IStandaloneCodeEditor) => {
+  const isNew = editors.get(groupId) !== e;
+  editors.set(groupId, e);
+  if (isNew) editorListeners.forEach((cb) => cb(e));
+};
 export const unregisterEditor = (groupId: string) => editors.delete(groupId);
 export const setActiveEditorGroup = (id: string) => (activeGroupId = id);
 export const activeEditor = () => (activeGroupId ? editors.get(activeGroupId) : undefined) ?? [...editors.values()][0];

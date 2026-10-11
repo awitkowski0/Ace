@@ -53,6 +53,8 @@ pub struct SpawnOpts {
     pub shell_integration: Option<bool>,
     /// Override of $SHELL (tests).
     pub shell: Option<String>,
+    /// Local interactive shells only: `<venv>/bin/activate`, sourced once at the first prompt (env `ATELIER_ACTIVATE`).
+    pub activate: Option<String>,
 }
 
 /// Output sink: (data bytes) / (exit code).
@@ -124,6 +126,11 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
                     cb.env("ATELIER_SHELL_INTEGRATION_DIR", z.to_string_lossy().as_ref());
                     cb.env("ATELIER_SHELL_INTEGRATION", "1");
                 }
+            }
+        }
+        if integ && dir.is_some() {
+            if let Some(a) = o.activate.as_deref().filter(|a| std::path::Path::new(a).is_file()) {
+                cb.env("ATELIER_ACTIVATE", a);
             }
         }
         let cwd = expand_home(&o.cwd);
@@ -366,7 +373,7 @@ mod tests {
             let _ = tx.lock().unwrap().send(o);
         });
         let id = spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, id: Some("t1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("echo hi".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, id: Some("t1".into()) },
             "test",
             sink,
         )
@@ -399,7 +406,7 @@ mod tests {
             }
         });
         spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, id: Some("fc1".into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: Some("yes | head -c 20000000".into()), cols: 80, rows: 24, login: None, shell_integration: None, shell: None, activate: None, id: Some("fc1".into()) },
             "test",
             sink,
         )
@@ -424,13 +431,17 @@ mod tests {
     }
 
     fn run_interactive(shell: &str, id: &str, script: &[&str]) -> String {
+        run_interactive_with(shell, id, script, None)
+    }
+
+    fn run_interactive_with(shell: &str, id: &str, script: &[&str], activate: Option<String>) -> String {
         let (tx, rx) = std::sync::mpsc::channel::<Out>();
         let tx = Mutex::new(tx);
         let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
             let _ = tx.lock().unwrap().send(o);
         });
         spawn_with(
-            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: None, cols: 80, rows: 24, login: Some(true), shell_integration: Some(true), shell: Some(shell.into()), id: Some(id.into()) },
+            SpawnOpts { host: "local".into(), cwd: "/tmp".into(), command: None, cols: 80, rows: 24, login: Some(true), shell_integration: Some(true), shell: Some(shell.into()), activate, id: Some(id.into()) },
             "test",
             sink,
         )
@@ -478,6 +489,22 @@ mod tests {
         assert!(out.contains("\x1b]7;file://") && out.contains("/usr\x07"), "osc7 after cd: {out:?}");
     }
 
+    /// Python "Activate virtualenv": the file named by `activate` is sourced once, before the first prompt, in zsh and bash.
+    #[test]
+    fn activate_script_is_sourced_once_at_the_first_prompt() {
+        let dir = std::env::temp_dir().join(format!("ace-activate-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let act = dir.join("activate");
+        std::fs::write(&act, "export ACE_ACT_TEST=on-$((20+22))\nACE_ACT_COUNT=$((${ACE_ACT_COUNT:-0}+1)); export ACE_ACT_COUNT\n").unwrap();
+        let bash = ["/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"].into_iter().find(|p| std::path::Path::new(p).exists());
+        let shells: Vec<&str> = ["/bin/zsh"].into_iter().filter(|p| std::path::Path::new(p).exists()).chain(bash).collect();
+        for (n, sh) in shells.iter().enumerate() {
+            let out = run_interactive_with(sh, &format!("act{n}"), &["echo \"A=<$ACE_ACT_TEST> N=<$ACE_ACT_COUNT> E=<${ATELIER_ACTIVATE-unset}>\"", "exit"], Some(act.to_string_lossy().into_owned()));
+            assert!(out.contains("A=<on-42> N=<1> E=<unset>"), "{sh}: {out:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn remote_integration_command_is_a_pure_pipe() {
         let c = remote_integration_command("cd ~");
@@ -496,7 +523,7 @@ mod tests {
             let sink: Arc<dyn Fn(&str, Out) + Send + Sync> = Arc::new(move |_, o| {
                 let _ = tx.lock().unwrap().send(o);
             });
-            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, shell_integration: None, shell: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
+            spawn_with(SpawnOpts { host: "mc".into(), cwd: "~".into(), command: Some(cmd.into()), cols: 100, rows: 30, login: None, shell_integration: None, shell: None, activate: None, id: Some("ssh1".into()) }, "test", sink).unwrap();
             let mut text = Vec::new();
             let mut code = None;
             while let Ok(o) = rx.recv_timeout(Duration::from_secs(30)) {

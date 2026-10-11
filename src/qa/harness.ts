@@ -213,6 +213,8 @@ export function installQaHarness() {
     listen,
     /** terminal test hooks (scripts/qa/terminal.mjs) */
     term: async () => (await import("../components/terminal/qa")).termQa,
+    /** Python test hooks (scripts/qa/python.mjs): { interp, run, debug, console, tests, packages, lsp, ... } */
+    py: async () => (await import("../components/python/qa")).pyQa(),
     version: 2,
   };
 }

@@ -5,6 +5,7 @@ import { ProblemsIcon, SearchIcon } from "../../components/shell/icons";
 import { registerAction } from "../../actions/registry";
 import { registerPopup, openPopup } from "../../components/shell/popups";
 import { activeEditor, triggerEditor } from "../editorRegistry";
+import { intentionProviderList } from "./servers";
 import { activeServerReady, bootWhenNeeded, lsp, prewarmGodotWhenIdle, trackGodotFocus } from "./api";
 import { FileStructurePopup, IntentionsPopup, InspectionWidget, ProblemsPanel, UsagesPanel, gotoProblem } from "./ui";
 
@@ -24,7 +25,7 @@ registerAction({ context: "editor", id: "GotoDeclaration", intellijId: "GotoDecl
 registerAction({ context: "editor", id: "FindUsages", intellijId: "FindUsages", title: "Find Usages", defaultKeys: ["alt F7"], isEnabled: activeServerReady, run: () => lsp.findUsages() });
 registerAction({ context: "editor", id: "RenameElement", intellijId: "RenameElement", title: "Rename…", defaultKeys: ["shift F6"], isEnabled: activeServerReady, run: () => lsp.rename() });
 registerAction({
-  context: "editor", id: "ShowIntentionActions", intellijId: "ShowIntentionActions", title: "Show Context Actions", defaultKeys: ["alt ENTER"], isEnabled: activeServerReady,
+  context: "editor", id: "ShowIntentionActions", intellijId: "ShowIntentionActions", title: "Show Context Actions", defaultKeys: ["alt ENTER"], isEnabled: () => activeServerReady() || intentionProviderList().length > 0,
   run: async () => { const items = await lsp.codeActions(); if (items.length) openPopup("Intentions", items); },
 });
 registerAction({

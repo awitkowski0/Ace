@@ -8,6 +8,8 @@ export interface PtySpawnOpts {
   rows: number;
   login?: boolean;
   shellIntegration?: boolean;
+  /** `<venv>/bin/activate` to source at the first prompt (local interactive shells; set by the Python module's activator). */
+  activate?: string;
   /** Frontend-chosen id so listeners can be attached before the first byte. */
   id?: string;
 }

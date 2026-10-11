@@ -26,6 +26,11 @@ if [[ -o interactive && -n "$ATELIER_SHELL_INTEGRATION" && -z "$__atelier_loaded
   }
   __atelier_chpwd() { __atelier_osc7 }
   __atelier_init() {
+    # Python "Activate virtualenv": source <venv>/bin/activate once, before the first prompt is drawn (so it shows "(.venv)").
+    if [[ -n "$ATELIER_ACTIVATE" ]]; then
+      [[ -r "$ATELIER_ACTIVATE" ]] && builtin source "$ATELIER_ACTIVATE" >/dev/null 2>&1
+      unset ATELIER_ACTIVATE
+    fi
     precmd_functions=(${precmd_functions:#__atelier_init})
     autoload -Uz add-zsh-hook
     add-zsh-hook precmd __atelier_precmd

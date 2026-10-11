@@ -16,7 +16,9 @@ export function applyTextEdits(text: string, edits: TextEdit[]): string {
   return out;
 }
 
-export async function applyWorkspaceEdit(edit: Json): Promise<void> {
+/** Applies the edit; returns the paths that were rewritten on disk (the ones not open in Monaco). */
+export async function applyWorkspaceEdit(edit: Json): Promise<string[]> {
+  const written: string[] = [];
   const byPath = new Map<string, TextEdit[]>();
   const add = (uri: string, es: TextEdit[]) => {
     const p = uriToPath(uri);
@@ -39,6 +41,8 @@ export async function applyWorkspaceEdit(edit: Json): Promise<void> {
     } else {
       const text = await fs.readFile(local(path));
       await fs.writeFile(local(path), applyTextEdits(text, edits));
+      written.push(path);
     }
   }
+  return written;
 }

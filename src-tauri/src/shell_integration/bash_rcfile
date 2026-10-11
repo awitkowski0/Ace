@@ -32,6 +32,11 @@ if [ -n "$ATELIER_SHELL_INTEGRATION" ] && [ -z "$__atelier_loaded" ]; then
   }
   # PS0 (bash >= 4.4) is printed right before a command runs: that is our "output starts" mark.
   PS0='\e]133;C\a'"${PS0-}"
+  # Python "Activate virtualenv": source <venv>/bin/activate before the first prompt (it shows "(.venv)").
+  if [ -n "$ATELIER_ACTIVATE" ]; then
+    [ -r "$ATELIER_ACTIVATE" ] && . "$ATELIER_ACTIVATE" >/dev/null 2>&1
+    unset ATELIER_ACTIVATE
+  fi
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
     PROMPT_COMMAND=(__atelier_precmd "${PROMPT_COMMAND[@]}")
   else

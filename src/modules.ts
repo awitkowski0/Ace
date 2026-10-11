@@ -10,4 +10,5 @@ import "./components/claude/register";
 import "./components/remote-files/register";
 import "./components/daemons/register";
 import "./editor/lsp/register";
+import "./components/python/register"; // Python: interpreters, run configs, debugger, console, tests, packages (docs/PYTHON.md)
 import "./components/shell/RecentProjects"; // RecentProjects popup (toolbar project widget)

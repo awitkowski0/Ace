@@ -1,14 +1,18 @@
 mod automation;
 mod claude;
 mod daemons;
+mod dap;
 mod fs;
 mod git;
 mod location;
 mod lsp;
 mod menu;
 mod procs;
+mod pstore;
+mod python;
 mod pty;
 mod remote;
+mod runner;
 mod search;
 mod termext;
 mod windows;
@@ -155,6 +159,29 @@ pub fn run() {
             daemons::daemons_cleanup_scan,
             daemons::daemons_cleanup_cancel,
             daemons::daemons_cleanup_run,
+            // == python == (run configs, interpreters, debugger, packages: docs/PYTHON.md)
+            pstore::pstore_get,
+            pstore::pstore_set,
+            runner::run_start,
+            runner::run_write,
+            runner::run_close_stdin,
+            runner::run_stop,
+            runner::run_interrupt,
+            runner::run_alive,
+            runner::proc_exec,
+            dap::dap_start,
+            dap::dap_send,
+            dap::dap_stop,
+            python::py_discover,
+            python::py_probe,
+            python::py_tools,
+            python::py_create_venv,
+            python::py_create_conda,
+            python::py_pypi_search,
+            python::py_pypi_info,
+            python::py_scripts_dir,
+            python::py_script_source,
+            python::py_filter,
         ])
         .build(context)
         .expect("error while building Atelier")

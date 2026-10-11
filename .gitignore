@@ -5,3 +5,4 @@ scripts/qa/.bin/
 scripts/qa/out/
 src-tauri/gen
 target
+src-tauri/target-qa/

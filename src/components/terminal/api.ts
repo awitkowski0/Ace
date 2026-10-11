@@ -12,3 +12,5 @@ export function openTerminal(opts: { host: string; cwd: string; command?: string
   showToolWindow("terminal");
   return id;
 }
+
+export { setTerminalActivator, type TerminalActivator } from "./activator";
