@@ -148,7 +148,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 button.primary, .dialog-buttons button { height: 28px; padding: 0 14px; border-radius: 6px; background: var(--bg-hover); }
 button.primary, .dialog-buttons button.primary { background: var(--accent-bg); color: var(--on-accent, #fff); }
-.menu { position: fixed; min-width: 200px; padding: 4px; background: var(--bg-popup); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+.menu { position: fixed; min-width: 200px; padding: 4px; background: var(--bg-popup); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.5); z-index: 120; }
 .menu-item { height: 26px; padding: 0 10px; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .menu-item:hover { background: var(--bg-selected); }
 .menu-item.disabled { color: var(--fg-faint); }
