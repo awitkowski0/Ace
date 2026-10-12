@@ -12,6 +12,7 @@ import { readRenderSources, setRenderFrom, type RenderSource } from "../core/sui
 import { loadSuitModel, useAsync } from "./data";
 import { Docks, ParseError, type ViewProps } from "./PackView";
 import { listData, resourceRoots, tr, translations } from "./resolve";
+import { addAbilityLang, awaitingLang, langPath } from "./newAbilityData";
 import { capture, BoolField, ColorField, Empty, EnumField, NumberField, Section, SceneTree, TextField, Vec3Field, type TreeNode } from "./widgets";
 import { Viewport3D, type Marker } from "./Viewport3D";
 import { playerRigModel } from "../../animstudio/ui/model";
@@ -147,7 +148,7 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
     return <ThemeInspector con={con} setCon={setCon} />;
   })();
 
-  return <Docks id="ability" tree={<SceneTree nodes={nodes} selected={sel} onSelect={select} testId="pe-tree" />} view={view} inspector={inspector} />;
+  return <Docks id="ability" tree={<SceneTree nodes={nodes} selected={sel} onSelect={select} testId="pe-tree" />} view={view} inspector={inspector} bar={<NewAbilityLangNote host={host} path={path} />} />;
 }
 
 const winNode = (w: ConsoleWindow, lang: Record<string, string>): TreeNode => ({
@@ -315,5 +316,28 @@ function WheelPreview({ con, lang, sel, select }: { con: ConsoleModel; lang: Rec
         })}
       </svg>
     </div>
+  );
+}
+
+/** After "Create ability": the new ability has no display name yet. Offers the two lang entries (HUD name and guide/menu name). */
+function NewAbilityLangNote({ host, path }: { host: string; path: string }) {
+  const [, bump] = useState(0);
+  const [done, setDone] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const info = awaitingLang.get(path);
+  if (done) return <span className="pe-note" data-testid="pe-lang-done">Added the display name to {done}. Save it with the lang file's tab.</span>;
+  if (!info) return null;
+  return (
+    <span className="pe-langnote" data-testid="pe-lang-note">
+      <span>
+        Add a display name in lang: <span className="mono">{info.id}</span> and <span className="mono">ability.thematic.{info.id}</span> in <span className="mono">{langPath("").replace(/^\//, "")}</span>.
+      </span>
+      <button className="pe-btn" data-testid="pe-lang-add" onClick={() => {
+        setErr(null);
+        addAbilityLang(host, info.root, info.id, info.title).then((p) => { awaitingLang.delete(path); setDone(p); }, (e) => setErr(String(e?.message ?? e)));
+      }}>Add “{info.title}”</button>
+      <button className="pe-btn" onClick={() => { awaitingLang.delete(path); bump((n) => n + 1); }}>Dismiss</button>
+      {err && <span className="pe-note warn" data-testid="pe-lang-error">{err}</span>}
+    </span>
   );
 }

@@ -117,4 +117,7 @@ export function translations(host: string, roots: string[], ns: string): Promise
   return p;
 }
 
+/** Forget the merged translations, so the next lookup reads the lang files again (one was just edited). */
+export const clearLangCache = () => langCache.clear();
+
 export const tr = (lang: Record<string, string>, key: unknown) => (typeof key === "string" ? lang[key] ?? key : "");

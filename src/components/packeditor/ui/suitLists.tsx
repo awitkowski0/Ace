@@ -5,6 +5,10 @@
  */
 import { Fragment, useState } from "react";
 import { defaultKeybind, filterAbilities, type AbilityEntry, type Catalog } from "../core/catalog";
+import { abilityNameProblem, defaultFolder, newAbilityId, normalizeAbilityName, normalizeFolder } from "../core/newAbility";
+import { packRoot } from "../core/kinds";
+import { openFile } from "../../../editor/store";
+import { createAbility, awaitingLang } from "./newAbilityData";
 import type { AttributeRow, StatRow, SuitAbility } from "../core/suit";
 import { listAdd, listMove, listRemove, listSet } from "../core/suit";
 import "./suitLists.css";
@@ -13,7 +17,7 @@ export type Edit = (fn: (cur: string) => string, live?: boolean) => void;
 
 // ---------------------------------------------------------------- abilities
 
-export function AbilityList({ abilities, catalog, selected, edit, onSelect }: {
+export function AbilityList({ abilities, catalog, selected, edit, onSelect, create }: {
   abilities: SuitAbility[];
   /** null until the project's files are read: nothing is flagged as missing yet */
   catalog: Catalog | null;
@@ -22,6 +26,8 @@ export function AbilityList({ abilities, catalog, selected, edit, onSelect }: {
   edit: Edit;
   /** a row was clicked (index), or the selection moved with a row (after a move or a removal); null: none */
   onSelect: (index: number | null) => void;
+  /** where a new ability would be made; without it the picker doesn't offer to create one */
+  create?: Omit<CreateCtx, "copyId" | "onCreated"> & { refresh: () => void };
 }) {
   const known = new Map((catalog?.abilities ?? []).map((a) => [a.id, a]));
   const keybinds = catalog?.keybinds ?? [];
@@ -30,6 +36,14 @@ export function AbilityList({ abilities, catalog, selected, edit, onSelect }: {
     const kb = defaultKeybind(catalog ?? emptyCatalog(), id);
     edit((cur) => listAdd(cur, "abilities", { identifier: id, keybind: kb }));
   };
+  // a new ability: it goes on the suit (one undo step) with the keybind of the one it copies, and opens in its own tab
+  const created = create && ((made: { id: string; path: string; title: string; sourceId: string | null }) => {
+    const kb = abilities.find((a) => a.id === made.sourceId)?.keybind ?? defaultKeybind(catalog ?? emptyCatalog(), made.id);
+    edit((cur) => listAdd(cur, "abilities", { identifier: made.id, keybind: kb }));
+    awaitingLang.set(made.path, { id: made.id, title: made.title, root: packRoot(made.path)!.root });
+    create.refresh();
+    void openFile({ host: create.host, path: made.path });
+  });
   // the selection follows the row it was on
   const move = (i: number, to: number) => {
     edit((cur) => listMove(cur, "abilities", i, to));
@@ -72,7 +86,7 @@ export function AbilityList({ abilities, catalog, selected, edit, onSelect }: {
           </div>
         );
       })}
-      <AbilityPicker catalog={catalog} taken={onSuit} onPick={add} />
+      <AbilityPicker catalog={catalog} taken={onSuit} onPick={add} create={create && created ? { ...create, copyId: selected !== null ? abilities[selected]?.id : undefined, onCreated: created } : undefined} />
     </div>
   );
 }
@@ -81,48 +95,174 @@ function emptyCatalog(): Catalog {
   return { ns: "thematic", abilities: [], abilityKeybinds: {}, keybinds: [], keybindCount: {}, stats: {}, attributeIds: {}, fightingTypes: [], flightTypes: [], jetGroups: [], tags: [], types: [], flightProfiles: [], suits: [] };
 }
 
-/** "Add ability…": a search over every ability id of the project; an id that isn't there can still be added, flagged. */
-export function AbilityPicker({ catalog, taken, onPick }: { catalog: Catalog | null; taken: Set<string>; onPick: (id: string) => void }) {
+/** What the "Add ability" picker needs to make a new ability in the suit's pack. */
+export interface CreateCtx {
+  host: string;
+  /** the suit file: the new ability goes in its pack */
+  path: string;
+  ns: string;
+  /** the suit's file name without extension (a folder of that name is the default one) */
+  suitId: string;
+  /** the id of the suit's selected ability, the default thing to copy */
+  copyId?: string;
+  /** the new ability is on disk (path, id, title) and the catalog should be read again */
+  onCreated: (made: { id: string; path: string; title: string; sourceId: string | null }) => void;
+}
+
+type PickItem = { kind: "create"; name: string; id: string } | { kind: "ability"; entry: AbilityEntry } | { kind: "typed"; id: string };
+
+/**
+ * "Add ability…": a search over every ability id of the project. A name that isn't an id yet offers "Create ability" first (Enter
+ * takes it); an id that isn't there can still be added anyway, flagged.
+ */
+export function AbilityPicker({ catalog, taken, onPick, create }: { catalog: Catalog | null; taken: Set<string>; onPick: (id: string) => void; create?: CreateCtx }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const [making, setMaking] = useState<string | null>(null); // the normalised name being created
   const all: AbilityEntry[] = catalog?.abilities ?? [];
   const typed = q.trim();
-  const results = filterAbilities(all, typed);
+  const name = create ? normalizeAbilityName(typed, create.ns) : "";
+  const newId = create ? newAbilityId(create.ns, name) : "";
+  let results = filterAbilities(all, typed);
+  if (results.length === 0 && name && name !== typed) results = filterAbilities(all, name);
   const exact = all.some((a) => a.id === typed);
+  const problem = create && catalog && name && !exact ? abilityNameProblem(name, create.ns, all.map((a) => a.id)) : null;
+  const canCreate = !!create && !!catalog && !!typed && !exact && !!name && !problem;
+  const anyway = !!typed && !exact && !taken.has(typed);
+  const items: PickItem[] = [
+    ...(canCreate ? [{ kind: "create" as const, name, id: newId }] : []),
+    ...results.map((entry) => ({ kind: "ability" as const, entry })),
+    ...(anyway ? [{ kind: "typed" as const, id: typed }] : []),
+  ];
   const pick = (id: string) => { onPick(id); setQ(""); };
+  const run = (it: PickItem | undefined) => {
+    if (!it) return;
+    if (it.kind === "create") { setMaking(it.name); setOpen(false); }
+    else if (it.kind === "ability") { if (!taken.has(it.entry.id)) pick(it.entry.id); }
+    else pick(it.id);
+  };
+  if (making && create && catalog) {
+    return <NewAbilityStep ctx={create} catalog={catalog} name={making} onCancel={() => { setMaking(null); }} onCreated={(m) => { setMaking(null); setQ(""); create.onCreated(m); }} />;
+  }
+  const active = Math.min(hi, Math.max(0, items.length - 1));
   return (
     <div className="pe-picker" data-testid="pe-ab-picker">
       <input className="pe-in pe-picker-in" data-testid="pe-ab-add" placeholder="Add ability…" value={q}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); setHi(0); }}
         onKeyDown={(e) => {
           if (e.key === "Escape") { setQ(""); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setHi(Math.max(0, Math.min(items.length - 1, active + (e.key === "ArrowDown" ? 1 : -1)))); }
           else if (e.key === "Enter") {
-            const first = results.find((a) => !taken.has(a.id));
-            if (first) pick(first.id);
-            else if (typed && !exact && !taken.has(typed)) pick(typed);
+            // the highlighted row, but never an ability already on the suit
+            run(items[active]?.kind === "ability" && taken.has((items[active] as { entry: AbilityEntry }).entry.id) ? items.find((it) => it.kind !== "ability" || !taken.has(it.entry.id)) : items[active]);
           }
         }} />
       {open && (
         <div className="pe-pick-list" data-testid="pe-ab-results" onMouseDown={(e) => e.preventDefault()}>
-          {results.map((a) => (
-            <button key={a.id} className="pe-pick-row" data-id={a.id} disabled={taken.has(a.id)} onClick={() => pick(a.id)}>
-              <span className="mono pe-pick-id">{a.id}</span>
-              <span className="pe-pick-folder">{a.folder || "abilities"}</span>
-              {a.description && <span className="pe-pick-desc">{a.description}</span>}
-              {taken.has(a.id) && <span className="pe-pick-on">on this suit</span>}
-            </button>
-          ))}
-          {typed && !exact && !taken.has(typed) && (
-            <button className="pe-pick-row warn" data-testid="pe-ab-add-typed" onClick={() => pick(typed)}>
-              <span className="mono pe-pick-id">{typed}</span>
-              <span className="pe-pick-desc">Add anyway: no ability script with this id in the project</span>
-            </button>
-          )}
-          {results.length === 0 && !typed && <div className="pe-note">No abilities in this project.</div>}
+          {items.map((it, i) => {
+            const cls = (i === active ? " active" : "");
+            if (it.kind === "create") return (
+              <button key="create" className={"pe-pick-row create" + cls} data-testid="pe-ab-create" data-id={it.id} onClick={() => run(it)}>
+                <span className="pe-pick-id">Create ability ‘{typed}’…</span>
+                <span className="mono pe-pick-folder">{it.id}</span>
+                <span className="pe-pick-desc">A new ability id{it.name !== typed ? `, written ${it.id}` : ""}; you pick which ability to copy next</span>
+              </button>
+            );
+            if (it.kind === "typed") return (
+              <button key="typed" className={"pe-pick-row warn" + cls} data-testid="pe-ab-add-typed" onClick={() => run(it)}>
+                <span className="mono pe-pick-id">{it.id}</span>
+                <span className="pe-pick-desc">Add anyway: no ability script with this id in the project</span>
+              </button>
+            );
+            const a = it.entry;
+            return (
+              <button key={a.id} className={"pe-pick-row" + cls} data-id={a.id} disabled={taken.has(a.id)} onClick={() => run(it)}>
+                <span className="mono pe-pick-id">{a.id}</span>
+                <span className="pe-pick-folder">{a.folder || "abilities"}</span>
+                {a.description && <span className="pe-pick-desc">{a.description}</span>}
+                {taken.has(a.id) && <span className="pe-pick-on">on this suit</span>}
+              </button>
+            );
+          })}
+          {problem && typed && <div className="pe-note warn" data-testid="pe-ab-create-problem">{problem}</div>}
+          {items.length === 0 && !typed && <div className="pe-note">No abilities in this project.</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The inline step after "Create ability": what to copy, which folder, then Enter / Create. Esc cancels. */
+function NewAbilityStep({ ctx, catalog, name, onCancel, onCreated }: {
+  ctx: CreateCtx; catalog: Catalog; name: string; onCancel: () => void; onCreated: (m: { id: string; path: string; title: string; sourceId: string | null }) => void;
+}) {
+  const id = newAbilityId(ctx.ns, name);
+  const all = catalog.abilities;
+  const start = ctx.copyId && all.some((a) => a.id === ctx.copyId) ? ctx.copyId : undefined;
+  const [src, setSrc] = useState<string | "blank" | undefined>(start); // undefined: nothing chosen yet
+  const [q, setQ] = useState("");
+  const [folder, setFolder] = useState<string | null>(null); // null: follows the choice
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const entry = src && src !== "blank" ? all.find((a) => a.id === src) : undefined;
+  const folders = [...new Set(all.filter((a) => a.ns === ctx.ns).map((a) => a.folder).filter(Boolean))].sort();
+  const folderValue = folder ?? defaultFolder(entry?.folder, ctx.suitId, folders);
+  const clean = normalizeFolder(folderValue);
+  const ext = entry?.path.endsWith(".json") ? "json" : "js";
+  const shown = filterAbilities(all, q);
+  const ready = src !== undefined && !busy;
+  const go = async () => {
+    if (!ready) { if (src === undefined) setErr("Pick an ability to copy, or Blank."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const made = await createAbility(ctx.host, ctx.path, name, clean, entry?.path ?? null);
+      onCreated({ id, path: made.path, title: made.title, sourceId: entry?.id ?? null });
+    } catch (e) {
+      setErr(String((e as Error).message ?? e));
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="pe-newab" data-testid="pe-newab" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}>
+      <div className="pe-newab-h">New ability <b className="mono" data-testid="pe-newab-id">{id}</b></div>
+      <div className="pe-newab-l">Copy from</div>
+      <input className="pe-in" autoFocus placeholder="Search abilities…" value={q} data-testid="pe-newab-q"
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const top = q.trim() ? shown[0] : undefined;
+          if (top && top.id !== src) setSrc(top.id); else void go();
+        }} />
+      <div className="pe-newab-list" data-testid="pe-newab-list">
+        <button className={"pe-pick-row" + (src === "blank" ? " sel" : "")} data-testid="pe-newab-blank" onClick={() => setSrc("blank")}>
+          <span className="pe-pick-id">Blank</span>
+          <span className="pe-pick-desc">A minimal script: a cooldown and a press that plays a sound</span>
+        </button>
+        {shown.map((a) => (
+          <button key={a.id} className={"pe-pick-row" + (src === a.id ? " sel" : "")} data-id={a.id} onClick={() => setSrc(a.id)}>
+            <span className="mono pe-pick-id">{a.id}</span>
+            <span className="pe-pick-folder">{a.folder || "abilities"}</span>
+            {a.description && <span className="pe-pick-desc">{a.description}</span>}
+          </button>
+        ))}
+        {shown.length === 0 && <div className="pe-note">No ability matches.</div>}
+      </div>
+      <label className="pe-newab-f">Folder
+        <input className="pe-in mono" list="pe-newab-folders" placeholder="(top level)" value={folderValue} data-testid="pe-newab-folder"
+          onChange={(e) => setFolder(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void go(); }} />
+        <datalist id="pe-newab-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
+      </label>
+      <div className="pe-note mono" data-testid="pe-newab-target">data/{ctx.ns}/abilities/{clean ? clean + "/" : ""}{name}.{ext}</div>
+      <div className="pe-btns">
+        <button className="pe-btn" disabled={!ready} onClick={() => void go()} data-testid="pe-newab-create">Create</button>
+        <button className="pe-btn" onClick={onCancel} data-testid="pe-newab-cancel">Cancel</button>
+      </div>
+      {err && <div className="pe-note warn" data-testid="pe-newab-error">{err}</div>}
     </div>
   );
 }

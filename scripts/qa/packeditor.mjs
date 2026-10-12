@@ -44,6 +44,11 @@ component(component => {
     component.hold(hold => hold.then("firing"));
 });
 `);
+w("data/thematic/abilities/shared/repulsor_blast.js", `// Repulsor Blast: fires a beam from the palm
+component(component => {
+    component.cooldown();
+});
+`);
 const REPULSOR = w("data/thematic/flight_profiles/repulsor.json", `{
   "parent": "thematic:jetpack",
   "effects": {
@@ -496,6 +501,99 @@ try {
     const kid = path.join(res, "data/thematic/flight_profiles/kid.json");
     const label = await E(`return document.querySelector('[data-testid=pe-tree] .pe-tn .pe-tn-l')?.textContent`);
     return { ok: ["thematic:repulsor", "thematic:jetpack", "thematic:palms", "thematic:child", "thematic:my_jet"].every((x) => opts.includes(x)) && opened && parent === "thematic:palms" && fs.existsSync(kid) && label === "kid", note: JSON.stringify({ opts, parent, label }) };
+  });
+
+  // ---- creating an ability (copy one, or blank) from the suit's Add ability picker
+  const typeAb = (v) => E(`const i = document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add]'); i.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(250); return 1`);
+  const keyOn = (sel, k) => E(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('no ' + ${JSON.stringify(sel)}); el.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })); await __qa.sleep(350); return 1`);
+  const typeIn = (sel, v) => E(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('no ' + ${JSON.stringify(sel)}); el.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(250); return 1`);
+  const abDir = path.join(res, "data/thematic/abilities");
+  let nt0;
+  await check("N1 create ability: an unknown name offers Create first; Enter opens the inline step (default copy = the selected ability, its folder)", async () => {
+    await open(SUIT);
+    await node("test_suit");
+    await node("Abilities");
+    nt0 = await text();
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-ab-row][data-ab="0"]`); // hand_beam is selected
+    await typeAb("Uni Beam");
+    const first = await E(`const r = document.querySelector('[data-testid=pe-ab-results]'); const b = r.querySelector('button'); return [b.dataset.testid, b.className, b.textContent]`);
+    await keyOn(`[data-testid=pack-editor] [data-testid=pe-ab-add]`, "Enter");
+    const step = await E(`const q = (t) => document.querySelector('[data-testid=' + t + ']'); return { id: q('pe-newab-id')?.textContent, sel: [...document.querySelectorAll('[data-testid=pe-newab-list] .pe-pick-row.sel')].map((b) => b.dataset.id ?? 'blank'), folder: q('pe-newab-folder')?.value, target: q('pe-newab-target')?.textContent, hasBlank: !!q('pe-newab-blank'), withDesc: [...document.querySelectorAll('[data-testid=pe-newab-list] [data-id=hand_beam] span')].map((x) => x.textContent) }`);
+    return { ok: first[0] === "pe-ab-create" && /active/.test(first[1]) && /Create ability ‘Uni Beam’…/.test(first[2]) && step.id === "uni_beam" && step.sel.join() === "hand_beam" && step.folder === "shared" && step.target === "data/thematic/abilities/shared/uni_beam.js" && step.hasBlank && step.withDesc.includes("Hand Beam"), note: JSON.stringify({ first, step }) };
+  });
+  await check("N2 create ability: Esc cancels; nothing written, the suit is unchanged", async () => {
+    await keyOn(`[data-testid=pe-newab-q]`, "Escape");
+    const gone = await E(`return !document.querySelector('[data-testid=pe-newab]') && !!document.querySelector('[data-testid=pe-ab-add]')`);
+    return { ok: gone && !fs.existsSync(path.join(abDir, "shared/uni_beam.js")) && (await text()) === nt0 };
+  });
+  await check("N3 create ability: Enter creates a retitled copy at the right path, adds it to the suit with the copied keybind (undoable), opens it", async () => {
+    await typeAb("Uni Beam");
+    await keyOn(`[data-testid=pack-editor] [data-testid=pe-ab-add]`, "Enter");
+    await typeIn(`[data-testid=pe-newab-folder]`, "Mine/Sub Dir");
+    const target = await E(`return document.querySelector('[data-testid=pe-newab-target]').textContent`);
+    await typeIn(`[data-testid=pe-newab-folder]`, "shared"); // back to the default
+    await keyOn(`[data-testid=pe-newab-folder]`, "Enter");
+    const file = path.join(abDir, "shared/uni_beam.js");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pack-editor]')?.dataset.kind === 'ability', 15000); await __qa.sleep(400); return 1`);
+    const content = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+    const orig = fs.readFileSync(path.join(abDir, "shared/hand_beam.js"), "utf8");
+    const noteShown = await E(`return document.querySelector('[data-testid=pe-lang-note]')?.textContent ?? null`);
+    await open(SUIT);
+    const j = JSON.parse(await text());
+    const last = j.abilities.at(-1);
+    await undo();
+    const undone = (await text()) === nt0;
+    return { ok: target === "data/thematic/abilities/mine/sub_dir/uni_beam.js" && content === orig.replace("// Hand Beam", "// Uni Beam") && /ability\.thematic\.uni_beam/.test(noteShown ?? "") && last.identifier === "uni_beam" && last.keybind === "key.thematic.ability_0" && undone, note: JSON.stringify({ target, content: content?.slice(0, 40), noteShown, last, undone }) };
+  });
+  await check("N4 create ability: a colon title keeps the text after it; the lang button adds both keys as a minimal text edit", async () => {
+    const langFile = path.join(res, "assets/thematic/lang/en_us.json");
+    const langBefore = fs.readFileSync(langFile, "utf8");
+    await node("test_suit"); await node("Abilities");
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-ab-row][data-ab="1"]`); // flight: not in the project, so nothing to copy by default
+    await typeAb("second blast");
+    await keyOn(`[data-testid=pack-editor] [data-testid=pe-ab-add]`, "Enter");
+    const none = await E(`return [document.querySelectorAll('[data-testid=pe-newab-list] .pe-pick-row.sel').length, document.querySelector('[data-testid=pe-newab-create]').disabled, document.querySelector('[data-testid=pe-newab-folder]').value]`);
+    await typeIn(`[data-testid=pe-newab-q]`, "repulsor");
+    await keyOn(`[data-testid=pe-newab-q]`, "Enter"); // the top hit is chosen
+    const chosen = await E(`return [...document.querySelectorAll('[data-testid=pe-newab-list] .pe-pick-row.sel')].map((b) => b.dataset.id)`);
+    await clickSel(`[data-testid=pe-newab-create]`);
+    const file = path.join(abDir, "shared/second_blast.js");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-lang-add]'), 15000); return 1`);
+    const content = fs.readFileSync(file, "utf8");
+    await clickSel(`[data-testid=pe-lang-add]`);
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-lang-done]'), 15000); return 1`);
+    const lang = fs.readFileSync(langFile, "utf8");
+    const j = JSON.parse(lang);
+    const prefix = langBefore.slice(0, langBefore.lastIndexOf('"Tactical map"') + '"Tactical map"'.length);
+    await open(SUIT);
+    const last = JSON.parse(await text()).abilities.at(-1);
+    await undo();
+    fs.writeFileSync(langFile, langBefore);
+    return { ok: none[0] === 0 && none[1] === true && chosen.join() === "repulsor_blast" && content.startsWith("// Second Blast: fires a beam from the palm\n") && j["second_blast"] === "Second Blast" && j["ability.thematic.second_blast"] === "Second Blast" && j["thematic.ultron.deploy"] === "Deploy" && lang.startsWith(prefix) && last.identifier === "second_blast", note: JSON.stringify({ none, chosen, content: content.slice(0, 50), lang }) };
+  });
+  await check("N5 create ability: Blank writes a minimal component script; an id that exists is rejected", async () => {
+    await node("test_suit"); await node("Abilities");
+    await typeAb("Blank One");
+    await keyOn(`[data-testid=pack-editor] [data-testid=pe-ab-add]`, "Enter");
+    await clickSel(`[data-testid=pe-newab-blank]`);
+    await typeIn(`[data-testid=pe-newab-folder]`, "");
+    await keyOn(`[data-testid=pe-newab-folder]`, "Enter");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pack-editor]')?.dataset.kind === 'ability', 15000); await __qa.sleep(300); return 1`);
+    const file = path.join(abDir, "blank_one.js");
+    const content = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    await open(SUIT);
+    await undo();
+    await node("test_suit"); await node("Abilities");
+    await typeAb("Hand Beam");
+    const dup = await E(`return { create: !!document.querySelector('[data-testid=pe-ab-create]'), problem: document.querySelector('[data-testid=pe-ab-create-problem]')?.textContent ?? null }`);
+    await typeAb("Blank One"); // made above, so the catalog (read again after creating) has it
+    const dup2 = await E(`return { create: !!document.querySelector('[data-testid=pe-ab-create]'), problem: document.querySelector('[data-testid=pe-ab-create-problem]')?.textContent ?? null }`);
+    await keyOn(`[data-testid=pack-editor] [data-testid=pe-ab-add]`, "Escape");
+    // the step itself refuses to overwrite a file that appeared meanwhile
+    fs.writeFileSync(path.join(abDir, "raced.js"), "// Raced\n");
+    await typeAb("Raced");
+    const raced = await E(`return !!document.querySelector('[data-testid=pe-ab-create]')`);
+    return { ok: /^\/\/ Blank One: /.test(content) && content.includes("component(component => {") && !dup.create && /already exists/.test(dup.problem ?? "") && !dup2.create && /already exists/.test(dup2.problem ?? "") && (await text()) === nt0, note: JSON.stringify({ content: content.slice(0, 60), dup, dup2, raced }) };
   });
 
   // ---- nothing reached disk unsaved

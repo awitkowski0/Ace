@@ -62,3 +62,14 @@
 /* read-only fields */
 .pe-ro { grid-template-columns: auto minmax(0, 1fr); }
 .pe-ro b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+
+/* create-ability row, active row, and the inline "New ability" step */
+.pe-pick-row.active:not(:disabled) { background: var(--bg-hover); }
+.pe-pick-row.create .pe-pick-id { color: var(--accent, #88c0d0); font-weight: 600; }
+.pe-pick-row.sel { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent, #88c0d0); }
+.pe-newab { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; font-size: 12px; }
+.pe-newab-h { color: var(--fg); }
+.pe-newab-l { color: var(--fg-dim); }
+.pe-newab-list { max-height: 200px; overflow: auto; border: 1px solid var(--border, #3b4252); border-radius: 4px; }
+.pe-newab-f { display: flex; align-items: center; gap: 6px; color: var(--fg-dim); }
+.pe-newab-f .pe-in { flex: 1; min-width: 0; }

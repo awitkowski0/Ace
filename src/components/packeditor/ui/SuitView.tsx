@@ -4,7 +4,7 @@
  * dragged in the view) and its flight setup. Where a move leaves the body is the ability's, shared by every suit with it, so
  * that opens the ability.
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { openFile } from "../../../editor/store";
 import type { NumVec3 } from "../../animstudio/core";
 import { anchorFrame, jetPosition, localToScene, type AnchorFrame } from "../core/anchors";
@@ -54,6 +54,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   const drag = useRef<{ index: number; base: NumVec3 } | null>(null);
 
   if (error || !suit) return <ParseError error={error} />;
+  const createCtx = pr ? { host, path, ns: pr.ns, suitId: id, refresh: () => setCatVer((n) => n + 1) } : undefined;
   const cat = catalog ?? scanCatalog([], pr?.ns ?? "thematic"); // values the docs name, until the project's files are read
 
   // ---- what renders from where
@@ -132,7 +133,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
 
   const inspector = (() => {
     if (sel === "suit") return <SuitInspector suit={suit} cat={cat} edit={edit} openProfile={openProfile} fc={flightCtx} />;
-    if (sel === "abilities" && abIndex < 0) return <AbilitiesPanel suit={suit} catalog={catalog} selected={null} edit={edit} onSelect={setSel} />;
+    if (sel === "abilities" && abIndex < 0) return <AbilitiesPanel suit={suit} catalog={catalog} selected={null} edit={edit} onSelect={setSel} create={createCtx} />;
     if (sel === "stats") return (
       <>
         <Section title="Stats"><StatTable rows={readStats(suit.raw)} catalog={catalog} edit={edit} /></Section>
@@ -167,7 +168,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
       const srcSel = sel?.startsWith("src:") ? info?.sources[Number(sel.split(":")[2])] : undefined;
       return (
         <>
-          <AbilitiesPanel suit={suit} catalog={catalog} selected={abIndex} edit={edit} onSelect={setSel} />
+          <AbilitiesPanel suit={suit} catalog={catalog} selected={abIndex} edit={edit} onSelect={setSel} create={createCtx} />
           <Section title={a.id}>
             {info?.path && <div className="pe-btns"><button className="pe-btn" onClick={() => void openFile({ host, path: info.path! })}>Open ability</button></div>}
             {srcSel && (
@@ -194,10 +195,10 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   );
 }
 
-function AbilitiesPanel({ suit, catalog, selected, edit, onSelect }: { suit: Suit; catalog: Catalog | null; selected: number | null; edit: Edit; onSelect: (sel: string | null) => void }) {
+function AbilitiesPanel({ suit, catalog, selected, edit, onSelect, create }: { suit: Suit; catalog: Catalog | null; selected: number | null; edit: Edit; onSelect: (sel: string | null) => void; create?: ComponentProps<typeof AbilityList>["create"] }) {
   return (
     <Section title="Abilities">
-      <AbilityList abilities={suit.abilities} catalog={catalog} selected={selected} edit={edit} onSelect={(i) => onSelect(i === null ? "abilities" : `ab:${i}`)} />
+      <AbilityList abilities={suit.abilities} catalog={catalog} selected={selected} edit={edit} onSelect={(i) => onSelect(i === null ? "abilities" : `ab:${i}`)} create={create} />
     </Section>
   );
 }
