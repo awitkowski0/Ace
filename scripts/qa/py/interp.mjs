@@ -234,7 +234,7 @@ export async function checks(c) {
       const sshIn = (cmd, input) => execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 mc ${JSON.stringify(cmd)}`, { input, stdio: ["pipe", "ignore", "ignore"] });
       sshIn(`mkdir -p ${rdir} && cat > ${rdir}/pyproject.toml`, '[project]\nname = "r"\n');
       sshIn(`cat > ${rdir}/a.py`, "print(1)\n");
-      rapp = await launch(`mc:${rdir}`, { sock: path.join(process.env.TMPDIR || "/tmp", `atelier-qa-remote-${process.pid}.sock`) });
+      rapp = await launch(`mc:${rdir}`, { sock: path.join(process.env.TMPDIR || "/tmp", `ace-qa-remote-${process.pid}.sock`) });
       const R = (body, o) => rapp.ev(`const py = await __qa.py(); ${body}`, o);
       const rsel = (sel, ms = 8000) => rapp.ev(`return !!(await __qa.waitFor(${dq(sel)}, ${ms}))`, { timeout: ms + 3000 });
       await check("remote (mc): the status widget shows the host's interpreter; the dialog creates a venv on the host (venv --without-pip fallback)", async () => {

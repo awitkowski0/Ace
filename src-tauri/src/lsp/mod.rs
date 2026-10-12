@@ -488,7 +488,7 @@ fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String
     let path = path_prepend.iter().map(|p| format!("{p}{sep}")).collect::<String>() + login_path();
     cmd.args(spec.args).env("PATH", path).current_dir(&root);
     if spec.id == "jdtls" {
-        let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("atelier/jdtls").join(format!("{:x}", root.bytes().fold(5381u64, |h, b| h.wrapping_mul(33) ^ b as u64)));
+        let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("ace/jdtls").join(format!("{:x}", root.bytes().fold(5381u64, |h, b| h.wrapping_mul(33) ^ b as u64)));
         cmd.arg("-data").arg(dir);
     }
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;

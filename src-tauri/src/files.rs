@@ -2,13 +2,13 @@
 use std::path::Path;
 use tauri::AppHandle;
 
-/// Pasteboard used by the file list. Same QA isolation as the terminal clipboard (private board under ATELIER_AUTOMATION).
+/// Pasteboard used by the file list. Same QA isolation as the terminal clipboard (private board under ACE_AUTOMATION).
 #[cfg(target_os = "macos")]
 fn pasteboard() -> objc2::rc::Retained<objc2_app_kit::NSPasteboard> {
     use objc2_app_kit::NSPasteboard;
     use objc2_foundation::NSString;
-    if std::env::var_os("ATELIER_AUTOMATION").is_some() {
-        NSPasteboard::pasteboardWithName(&NSString::from_str("atelier-qa-files"))
+    if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
+        NSPasteboard::pasteboardWithName(&NSString::from_str("ace-qa-files"))
     } else {
         NSPasteboard::generalPasteboard()
     }
@@ -55,7 +55,7 @@ function In-Utf8{$r=New-Object IO.StreamReader([Console]::OpenStandardInput(),[T
     }
 }
 
-/// Windows file-list clipboard under ATELIER_AUTOMATION: a process-private slot, so QA never touches the real clipboard.
+/// Windows file-list clipboard under ACE_AUTOMATION: a process-private slot, so QA never touches the real clipboard.
 #[cfg(windows)]
 static QA_FILES: parking_lot::Mutex<Vec<String>> = parking_lot::Mutex::new(Vec::new());
 
@@ -71,7 +71,7 @@ pub fn files_clipboard_write(app: AppHandle, paths: Vec<String>) -> Result<(), S
     #[cfg(windows)]
     {
         let _ = &app;
-        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+        if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
             *QA_FILES.lock() = paths;
             return Ok(());
         }
@@ -80,9 +80,9 @@ pub fn files_clipboard_write(app: AppHandle, paths: Vec<String>) -> Result<(), S
         return powershell(
             r#"Add-Type -AssemblyName System.Windows.Forms;
 $list=New-Object System.Collections.Specialized.StringCollection;
-foreach($p in $env:ATELIER_PATHS.Split([char]10)){ if($p -ne ''){ [void]$list.Add($p) } }
+foreach($p in $env:ACE_PATHS.Split([char]10)){ if($p -ne ''){ [void]$list.Add($p) } }
 if($list.Count -gt 0){ [System.Windows.Forms.Clipboard]::SetFileDropList($list) } else { [System.Windows.Forms.Clipboard]::Clear() }"#,
-            &[("ATELIER_PATHS", &joined(&paths))],
+            &[("ACE_PATHS", &joined(&paths))],
             None,
         )
         .map(|_| ());
@@ -113,7 +113,7 @@ pub fn files_clipboard_read(app: AppHandle) -> Result<Vec<String>, String> {
     #[cfg(windows)]
     {
         let _ = &app;
-        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+        if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
             return Ok(QA_FILES.lock().clone());
         }
         return powershell(
@@ -153,7 +153,7 @@ pub fn files_reveal(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
-    if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+    if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
         return Ok(()); // never pop Finder windows during QA
     }
     #[cfg(target_os = "macos")]
@@ -185,7 +185,7 @@ pub fn files_reveal(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
 /// Open with the default app (macOS: `open <path>`; Windows: the opener plugin's ShellExecute).
 #[tauri::command]
 pub fn files_open(app: AppHandle, path: String) -> Result<(), String> {
-    if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+    if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
         return Ok(());
     }
     #[cfg(windows)]
@@ -220,14 +220,14 @@ pub fn fs_trash(paths: Vec<String>) -> Result<(), String> {
 fn trash_windows(paths: &[String]) -> Result<(), String> {
     powershell(
         r#"Add-Type -AssemblyName Microsoft.VisualBasic;
-foreach($p in $env:ATELIER_PATHS.Split([char]10)){
+foreach($p in $env:ACE_PATHS.Split([char]10)){
   if($p -eq ''){ continue }
   try {
     if((Get-Item -LiteralPath $p -Force).PSIsContainer){ [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p,'OnlyErrorDialogs','SendToRecycleBin') }
     else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs','SendToRecycleBin') }
   } catch { Err-Utf8 ($p + ': ' + $_.Exception.Message); exit 1 }
 }"#,
-        &[("ATELIER_PATHS", &joined(paths))],
+        &[("ACE_PATHS", &joined(paths))],
         None,
     )
     .map(|_| ())

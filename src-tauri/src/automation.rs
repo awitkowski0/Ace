@@ -1,5 +1,5 @@
-//! QA automation harness. Compiled in always, but INERT unless `ATELIER_AUTOMATION=1` is set at launch:
-//! then a unix socket (mode 0600) at `$ATELIER_AUTOMATION_SOCK` (default `$TMPDIR/atelier-automation.sock`)
+//! QA automation harness. Compiled in always, but INERT unless `ACE_AUTOMATION=1` is set at launch:
+//! then a unix socket (mode 0600) at `$ACE_AUTOMATION_SOCK` (default `$TMPDIR/ace-automation.sock`)
 //! accepts one request per connection: the raw bytes are an async JS function body, evaluated in the main
 //! webview; the reply is one JSON line `{"ok":bool,"value":<json>|"error":string}`.
 //! The webview returns values through the `qa_result` command. Timeout 30s.
@@ -19,7 +19,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 pub fn enabled() -> bool {
-    std::env::var("ATELIER_AUTOMATION").map(|v| !v.is_empty() && v != "0").unwrap_or(false)
+    crate::appenv::var("ACE_AUTOMATION").map(|v| !v.is_empty() && v != "0").unwrap_or(false)
 }
 
 type Pending = Mutex<HashMap<u64, (String, Sender<Result<String, String>>)>>;
@@ -30,9 +30,9 @@ fn pending() -> &'static Pending {
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 pub fn sock_path() -> std::path::PathBuf {
-    std::env::var_os("ATELIER_AUTOMATION_SOCK")
+    crate::appenv::var_os("ACE_AUTOMATION_SOCK")
         .map(Into::into)
-        .unwrap_or_else(|| std::env::temp_dir().join("atelier-automation.sock"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ace-automation.sock"))
 }
 
 /// Frontend asks at startup whether to install `window.__qa`.
@@ -83,7 +83,7 @@ pub fn start(app: &AppHandle) {
 
 fn trace() -> bool {
     static T: OnceLock<bool> = OnceLock::new();
-    *T.get_or_init(|| std::env::var_os("ATELIER_AUTOMATION_TRACE").is_some())
+    *T.get_or_init(|| crate::appenv::var_os("ACE_AUTOMATION_TRACE").is_some())
 }
 
 fn handle(app: AppHandle, mut conn: local_ipc::Stream) {

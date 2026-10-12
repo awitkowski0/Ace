@@ -3,8 +3,8 @@
 // sounds.json, .geo.bbmodel, hidden generated models), Run Game picking the task for the branch's Minecraft version + the version menu, the
 // version-branch notice/prefix, "New suit" and the Studio opening from the tree.
 // Everything runs on a SYNTHETIC repo (+ bare remote) in a temp dir; the real Thematic-Collections is never opened or touched.
-// Drives the app only through the ATELIER_AUTOMATION harness (never the real keyboard/mouse).
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/assetmode.mjs
+// Drives the app only through the ACE_AUTOMATION harness (never the real keyboard/mouse).
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/assetmode.mjs
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -113,7 +113,7 @@ try {
     await sleep(500);
     const groups = await treeRows("group");
     const label = groups.map((x) => `${x.name}:${x.hint}`).join(" ");
-    return { ok: label === "Armor:5 Items:1 Entities:2 Sounds:2 Language:1 Poses:2 Particles:1 Animation controllers:2 Other:2", note: label };
+    return { ok: label === "Suits:1 Armor:5 Items:1 Entities:2 Sounds:2 Language:1 Poses:2 Particles:1 Animation controllers:2 Other:2", note: label };
   });
   await check("Assets tree: anim_controllers (data/), pose sets, particles, sounds.json and .geo.bbmodel are listed", async () => {
     for (const n of ["Animation controllers", "Poses", "Particles", "Sounds", "Entities"]) await click('[data-testid=asset-tree] [data-row=group]', n);

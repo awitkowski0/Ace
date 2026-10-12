@@ -49,7 +49,10 @@ describe("Thematic layout: built-in classification (no config)", () => {
     expect(T(`${C}/assets/thematic/models/animations/flight/idle/default.pose`)).toMatchObject({ type: "pose", name: "default" });
   });
   it("the rest of data/ stays code", () => {
-    for (const p of [`${C}/data/thematic/recipe/x.json`, `${H}/data/thematic/armors/batfamily/robin.json`, `${C}/data/thematic/loot_table/blocks/x.json`]) expect(T(p), p).toBeNull();
+    for (const p of [`${C}/data/thematic/recipe/x.json`, `${C}/data/thematic/loot_table/blocks/x.json`, `${H}/data/thematic/abilities/ultron/hive_control.js`]) expect(T(p), p).toBeNull();
+  });
+  it("suits are assets (the pack editor opens them)", () => {
+    expect(T(`${H}/data/thematic/armors/batfamily/robin.json`)).toMatchObject({ type: "suit", name: "robin", sub: "batfamily", inTree: true });
   });
   it("particles and sounds.json show up; .geo.bbmodel keeps a clean name", () => {
     expect(T(`${C}/assets/thematic/particles/smoke_particle.json`)).toMatchObject({ type: "particle", inTree: true, name: "smoke_particle" });
@@ -65,8 +68,8 @@ describe("Thematic layout: built-in classification (no config)", () => {
   });
   it("groups: suits under Armor, controllers/particles/poses get their own flat groups, textures without a kind go to Other", () => {
     const g = groupAssets(TREE);
-    expect(g.map((x) => x.label)).toEqual(["Armor", "Items", "Entities", "Blocks", "Sounds", "Language", "Poses", "Particles", "Animation controllers", "Other"]);
-    const armor = g[0].sections.map((s) => `${s.label}:${s.files.length}`);
+    expect(g.map((x) => x.label)).toEqual(["Suits", "Armor", "Items", "Entities", "Blocks", "Sounds", "Language", "Poses", "Particles", "Animation controllers", "Other"]);
+    const armor = g[1].sections.map((s) => `${s.label}:${s.files.length}`);
     expect(armor).toEqual(["Models:1", "Animations:2", "Textures:3"]);
     expect(g.find((x) => x.label === "Animation controllers")!.count).toBe(3);
     expect(g.find((x) => x.label === "Other")!.sections.map((s) => s.label)).toEqual(["Models", "Animations", "Textures"]);

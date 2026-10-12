@@ -18,7 +18,7 @@
 .dm-table .mono { font-family: var(--font-mono); font-size: 12px; }
 .dm-tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 16px; background: var(--bg-hover); }
 .dm-tag.gradle { color: var(--nord14); } .dm-tag.kotlin { color: var(--nord15); } .dm-tag.java { color: var(--nord12); }
-.dm-tag.lsp { color: var(--nord8); } .dm-tag.claude { color: var(--nord13); } .dm-tag.atelier { color: var(--nord9); }
+.dm-tag.lsp { color: var(--nord8); } .dm-tag.claude { color: var(--nord13); } .dm-tag.ace { color: var(--nord9); }
 .dm-busy { color: var(--nord13); } .dm-idle { color: var(--fg-dim); }
 .dm-empty { padding: 16px; color: var(--fg-dim); }
 .dm-group { padding: 6px 8px 2px; color: var(--fg-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }

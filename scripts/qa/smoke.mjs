@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Scripted smoke checklist. Launches Atelier on a COPY of a scratch project (never a real project), drives it
+// Scripted smoke checklist. Launches Ace on a COPY of a scratch project (never a real project), drives it
 // only through the automation harness (no OS-level input), prints a pass/fail table, writes shots to scripts/qa/out/.
-// Usage: node scripts/qa/smoke.mjs [--keep]    Env: ATELIER_BIN, SCRATCH (dir for the copy)
+// Usage: node scripts/qa/smoke.mjs [--keep]    Env: ACE_BIN, SCRATCH (dir for the copy)
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launch, sleep } from "./lib.mjs";
 
-const scratch = process.env.SCRATCH || fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "atelier-smoke-"));
+const scratch = process.env.SCRATCH || fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "ace-smoke-"));
 const proj = path.join(scratch, "proj");
 fs.rmSync(proj, { recursive: true, force: true });
 fs.mkdirSync(path.join(proj, "scripts"), { recursive: true });

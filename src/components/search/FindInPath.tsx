@@ -19,7 +19,7 @@ const PreviewEditor = lazy(async () => {
   return { default: m.default };
 });
 
-const LS = "atelier.findInPath";
+const LS = "ace.findInPath";
 const loadPrefs = () => {
   try { return JSON.parse(localStorage.getItem(LS) ?? "{}"); } catch { return {}; }
 };

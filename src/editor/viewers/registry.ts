@@ -8,7 +8,7 @@
  */
 export type ViewerId =
   | "image" | "audio" | "video" | "model" | "font" | "nbt" | "archive" | "binary" | "toolarge";
-export type DualId = "svg" | "markdown" | "csv" | "svg" | "bbmodel" | "mcmeta" | "animstudio";
+export type DualId = "svg" | "markdown" | "csv" | "svg" | "bbmodel" | "mcmeta" | "animstudio" | "pack";
 export type DualMode = "editor" | "split" | "preview";
 
 export interface Provider {
@@ -22,9 +22,15 @@ export interface Provider {
   previewLabel?: string;
   /** match `name` exactly (e.g. "x.png.mcmeta"); checked before extensions */
   suffix?: string;
+  /** match by where the file is (pack files: data/<ns>/armors/…); checked first, needs the path */
+  match?: (path: string) => boolean;
 }
 
+// Pack editor (docs/PACKEDITOR.md): suits, abilities, HUDs, flight profiles and guide pages, by folder.
+const PACK_FILE = /\/data\/[^/]+\/(armors|abilities|huds|flight_profiles)\/.+\.(json|js)$|\/guide\/[^/]+\/[^/]+\/(entries|categories)\/.+\.json$/;
+
 export const PROVIDERS: Provider[] = [
+  { id: "pack", title: "Pack editor", kind: "dual", exts: [], match: (p) => PACK_FILE.test(p.replace(/\\/g, "/")), defaultMode: "split", previewLabel: "Designer" },
   { id: "mcmeta", title: "Animated texture", kind: "dual", exts: [], suffix: ".png.mcmeta", defaultMode: "split", previewLabel: "Animation" },
   { id: "image", title: "Image", kind: "viewer", exts: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "icns", "tga", "avif", "cur"] },
   { id: "svg", title: "SVG", kind: "dual", exts: ["svg"], defaultMode: "preview", previewLabel: "Image" },
@@ -60,7 +66,11 @@ export const extOf = (name: string) => {
   return i > 0 || (i === 0 && name.length > 1) ? name.slice(i + 1).toLowerCase() : "";
 };
 
-export function providerFor(name: string): Provider | null {
+export function providerFor(name: string, path?: string): Provider | null {
+  if (path) {
+    const byPath = PROVIDERS.find((p) => p.match?.(path));
+    if (byPath) return byPath;
+  }
   const lower = name.toLowerCase();
   const bySuffix = PROVIDERS.find((p) => p.suffix && lower.endsWith(p.suffix));
   if (bySuffix) return bySuffix;
@@ -80,8 +90,8 @@ export interface Decision {
 }
 
 /** First-pass decision by name only. */
-export function decide(name: string): Decision {
-  const p = providerFor(name);
+export function decide(name: string, path?: string): Decision {
+  const p = providerFor(name, path);
   if (p?.kind === "viewer") return { viewer: p.id as ViewerId, needsProbe: false };
   if (p?.kind === "dual") return { dual: p.id as DualId, needsProbe: true };
   const ext = extOf(name);

@@ -76,7 +76,7 @@ export const uriToPath = (uri: string) => {
 export const pathToUri = (path: string) =>
   "file://" + path.split("/").map((s) => encodeURIComponent(s).replace(/%40/g, "@")).join("/");
 
-const AUTO_KEY = "atelier.lsp.autoGodot";
+const AUTO_KEY = "ace.lsp.autoGodot";
 const readAuto = () => { try { return localStorage.getItem(AUTO_KEY) !== "0"; } catch { return true; } };
 /** "Auto-start headless Godot" toggle (default on). */
 export const lspSettings = createStore<{ autoGodot: boolean }>({ autoGodot: readAuto() });

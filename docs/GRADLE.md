@@ -123,7 +123,7 @@ a class that is not loaded in the JVM yet is skipped (a new class cannot be adde
 
 ### Tests
 `node scripts/qa/hotswap.mjs [--thematic]` (scratch project with a nested Exec build; `--thematic` = read-only classpath dump on ~/IdeaProjects/Thematic-Collections). Rust (`cd src-tauri && cargo test --lib`): `procs::tests` (daemon safety, marker kill), `jdwp::tests` (codec against a fake VM), `hotswap::tests` (JDK pick, nearest build, project choice, processors, init script rules); vitest: `src/components/gradle/java/pure.test.ts`.
-`ATELIER_JDWP_TRACE=1` prints every JDWP packet to stderr.
+`ACE_JDWP_TRACE=1` prints every JDWP packet to stderr.
 
 ### Status (debug runs / hot swap)
 Verified with `node scripts/qa/hotswap.mjs --thematic` against the release build (43/43): Debug attaches ("Waiting for JVM…" then attached); method-body reload (same JVM pid) incl. inner + anonymous classes; classpath dump cached per session

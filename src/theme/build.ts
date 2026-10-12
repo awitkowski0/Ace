@@ -107,7 +107,7 @@ export function monacoTheme(s: Scheme): editor.IStandaloneThemeData {
 }
 
 type Term = Record<string, string>;
-/** xterm theme (hex strings) for the IDE scheme. Used while the terminal's own setting is the default "Nord (Atelier)". */
+/** xterm theme (hex strings) for the IDE scheme. Used while the terminal's own setting is the default "Nord (Ace)". */
 export function termTheme(s: Scheme): Term {
   const u = s.ui, [red, green, yellow, blue, magenta, cyan] = s.ansi.map(h);
   const toward = s.dark ? "#ffffff" : "#000000";

@@ -2,13 +2,16 @@
 // Usage: node scripts/qa/eval.mjs [--window project-2] '<async JS body>'   (body may `return` a value; window.__qa has the helpers)
 //        echo 'return __qa.state()' | node scripts/qa/eval.mjs -
 // Without --window the body runs in the active (last focused) project window; `__qa.windows()` lists the windows.
-// Env: ATELIER_AUTOMATION_SOCK (default $TMPDIR/atelier-automation.sock)
+// Env: ACE_AUTOMATION_SOCK (default $TMPDIR/ace-automation.sock; the old ATELIER_AUTOMATION_SOCK is still read)
 import net from "node:net";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const sockPath = () => process.env.ATELIER_AUTOMATION_SOCK || path.join(process.env.TMPDIR || "/tmp", "atelier-automation.sock");
+/** `ACE_<name>` from the environment, falling back to the pre-rename `ATELIER_<name>`. */
+export const aceEnv = (name, e = process.env) => e["ACE_" + name] ?? e["ATELIER_" + name];
+
+export const sockPath = () => aceEnv("AUTOMATION_SOCK") || path.join(process.env.TMPDIR || "/tmp", "ace-automation.sock");
 
 /** Open the automation connection. Windows: loopback TCP to the port in `<sock>.json` ({port, token}), token line first
  *  (same as openBridge in tools/ace-mcp/src/bridge.ts). Unix: the unix socket at `sock`. */
@@ -21,7 +24,7 @@ export function openAutomation(sock) {
   return c;
 }
 
-/** Evaluate an async JS body in the Atelier webview. Resolves to the returned value; rejects on JS error/timeout. */
+/** Evaluate an async JS body in the Ace webview. Resolves to the returned value; rejects on JS error/timeout. */
 export function evalJs(body, { sock = sockPath(), timeout = 35000, window } = {}) {
   // Optional target window: a JSON header line {"window":"project-2"} in front of the body (see automation.rs).
   if (window) body = JSON.stringify({ window }) + "\n" + body;

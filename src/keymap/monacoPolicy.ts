@@ -7,8 +7,8 @@
  * Decision per Monaco default binding (command, key[s], when):
  *  keep-widget   `when` names a Monaco widget (suggest, find input, snippet, hover, rename input...) - the widget needs its keys
  *  keep-same     same meaning as the IntelliJ action(s) bound to that key (EQUIV)
- *  remove-routed key is bound to a different IntelliJ action that Atelier implements; Atelier's dispatcher runs it
- *  remove-swallow key is bound to a different IntelliJ action Atelier does not implement; swallowed (no-op) in the editor
+ *  remove-routed key is bound to a different IntelliJ action that Ace implements; Ace's dispatcher runs it
+ *  remove-swallow key is bound to a different IntelliJ action Ace does not implement; swallowed (no-op) in the editor
  *  remove-unbound Monaco-only binding; IntelliJ binds nothing there
  */
 import { parseKeystroke } from "../actions/keystroke";
@@ -45,7 +45,7 @@ export function isWidgetScoped(when: string | null): boolean {
 }
 
 /**
- * Monaco command -> IntelliJ actions with the SAME meaning. Commands Atelier re-implements itself (find bar, line ops
+ * Monaco command -> IntelliJ actions with the SAME meaning. Commands Ace re-implements itself (find bar, line ops
  * routed to a different key, ...) are deliberately NOT listed so their Monaco bindings get removed.
  */
 const EQUIV: Record<string, string[]> = {
@@ -74,7 +74,7 @@ const EQUIV: Record<string, string[]> = {
   "editor.action.triggerParameterHints": ["ParameterInfo"],
 };
 
-/** IntelliJ actions Atelier runs on a key (registered by this module's defs or by other modules). */
+/** IntelliJ actions Ace runs on a key (registered by this module's defs or by other modules). */
 export const EXTERNAL_IMPLEMENTED = [
   "GotoDeclaration", "FindUsages", "RenameElement", "ShowIntentionActions", "FileStructurePopup", "GotoNextError", "GotoPreviousError",
   "QuickJavaDoc", "ParameterInfo", "CodeCompletion", "SearchEverywhere", "GotoFile", "GotoClass", "GotoSymbol", "GotoAction",

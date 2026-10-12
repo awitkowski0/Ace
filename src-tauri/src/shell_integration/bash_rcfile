@@ -1,14 +1,14 @@
-# Atelier: bash rcfile. Emulates a login shell (the real profile files are only read, never changed), then adds the integration.
-if [ -z "$ATELIER_BASH_NOLOGIN" ]; then
+# Ace: bash rcfile. Emulates a login shell (the real profile files are only read, never changed), then adds the integration.
+if [ -z "$ACE_BASH_NOLOGIN" ]; then
   [ -r /etc/profile ] && . /etc/profile
   for __f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
     if [ -r "$__f" ]; then . "$__f"; break; fi
   done
   unset __f
 fi
-if [ -n "$ATELIER_SHELL_INTEGRATION" ] && [ -z "$__atelier_loaded" ]; then
-  __atelier_loaded=1
-  __atelier_urlenc() {
+if [ -n "$ACE_SHELL_INTEGRATION" ] && [ -z "$__ace_loaded" ]; then
+  __ace_loaded=1
+  __ace_urlenc() {
     local LC_ALL=C s=$1 i c out=
     for ((i = 0; i < ${#s}; i++)); do
       c=${s:i:1}
@@ -19,10 +19,10 @@ if [ -n "$ATELIER_SHELL_INTEGRATION" ] && [ -z "$__atelier_loaded" ]; then
     done
     printf %s "$out"
   }
-  __atelier_precmd() {
+  __ace_precmd() {
     local ret=$?
     printf '\e]133;D;%s\a' "$ret"
-    printf '\e]7;file://%s%s\a' "${HOSTNAME}" "$(__atelier_urlenc "$PWD")"
+    printf '\e]7;file://%s%s\a' "${HOSTNAME}" "$(__ace_urlenc "$PWD")"
     printf '\e]2;%s\a' "${PWD/#$HOME/\~}"
     case $PS1 in
       *'133;A'*) ;;
@@ -33,22 +33,22 @@ if [ -n "$ATELIER_SHELL_INTEGRATION" ] && [ -z "$__atelier_loaded" ]; then
   # PS0 (bash >= 4.4) is printed right before a command runs: that is our "output starts" mark.
   PS0='\e]133;C\a'"${PS0-}"
   # Python "Activate virtualenv": source <venv>/bin/activate before the first prompt (it shows "(.venv)").
-  if [ -n "$ATELIER_ACTIVATE" ]; then
-    [ -r "$ATELIER_ACTIVATE" ] && . "$ATELIER_ACTIVATE" >/dev/null 2>&1
-    unset ATELIER_ACTIVATE
+  if [ -n "$ACE_ACTIVATE" ]; then
+    [ -r "$ACE_ACTIVATE" ] && . "$ACE_ACTIVATE" >/dev/null 2>&1
+    unset ACE_ACTIVATE
   fi
-  # Claude notifications (see atelier.zsh): `claude` starts with Ace's hooks unless the user defines their own claude alias/function.
-  if [ -n "$ATELIER_HOOK_FILE" ] && [ -n "$ATELIER_CLAUDE_SETTINGS" ] && ! alias claude >/dev/null 2>&1 && ! declare -F claude >/dev/null 2>&1; then
+  # Claude notifications (see ace.zsh): `claude` starts with Ace's hooks unless the user defines their own claude alias/function.
+  if [ -n "$ACE_HOOK_FILE" ] && [ -n "$ACE_CLAUDE_SETTINGS" ] && ! alias claude >/dev/null 2>&1 && ! declare -F claude >/dev/null 2>&1; then
     claude() {
       case "${1-}" in agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) command claude "$@"; return;; esac
       local a; for a in "$@"; do case "$a" in -p|--print|-h|--help|-v|--version|--bg) command claude "$@"; return;; esac; done
-      local __pd=(); [ -n "$ATELIER_CLAUDE_PLUGIN_DIR" ] && __pd=(--plugin-dir "$ATELIER_CLAUDE_PLUGIN_DIR")
-      command "${ATELIER_CLAUDE_BIN:-claude}" --settings "$ATELIER_CLAUDE_SETTINGS" "${__pd[@]}" "$@"
+      local __pd=(); [ -n "$ACE_CLAUDE_PLUGIN_DIR" ] && __pd=(--plugin-dir "$ACE_CLAUDE_PLUGIN_DIR")
+      command "${ACE_CLAUDE_BIN:-${ATELIER_CLAUDE_BIN:-claude}}" --settings "$ACE_CLAUDE_SETTINGS" "${__pd[@]}" "$@"
     }
   fi
   if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    PROMPT_COMMAND=(__atelier_precmd "${PROMPT_COMMAND[@]}")
+    PROMPT_COMMAND=(__ace_precmd "${PROMPT_COMMAND[@]}")
   else
-    PROMPT_COMMAND="__atelier_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    PROMPT_COMMAND="__ace_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
   fi
 fi

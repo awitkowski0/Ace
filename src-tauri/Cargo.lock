@@ -3,6 +3,39 @@
 version = 4
 
 [[package]]
+name = "ace"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "dirs 5.0.1",
+ "grep-matcher",
+ "grep-regex",
+ "grep-searcher",
+ "ignore",
+ "libc",
+ "notify",
+ "nucleo-matcher",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "parking_lot",
+ "portable-pty",
+ "regex",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "symphonia",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "ureq",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,39 +209,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
-]
-
-[[package]]
-name = "atelier"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "dirs 5.0.1",
- "grep-matcher",
- "grep-regex",
- "grep-searcher",
- "ignore",
- "libc",
- "notify",
- "nucleo-matcher",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "parking_lot",
- "portable-pty",
- "regex",
- "serde",
- "serde_json",
- "signal-hook",
- "symphonia",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "ureq",
 ]
 
 [[package]]

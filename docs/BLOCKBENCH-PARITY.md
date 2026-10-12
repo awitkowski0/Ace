@@ -815,7 +815,7 @@ Generated from `js/**` (`new Action/Tool/Toggle/BarSelect` with `modes` in `edit
 | UV Mode | `cube_uv_mode` | global | — | js/outliner/types/cube.js:1718 | Bedrock (cube/group/UV) |
 | Transparency Render Order | `element_render_order` | global | — | js/outliner/types/cube.js:1742 | Bedrock (cube/group/UV) |
 
-## 5. Bedrock/GeckoLib-relevant facts to carry into Atelier
+## 5. Bedrock/GeckoLib-relevant facts to carry into Ace
 
 - **Mesh and Spline editing is not available for Bedrock.** Mesh elements (`create_face`, `extrude_mesh_selection`, `loop_cut`, `merge_vertices`, knife, seams, proportional editing) and spline tools are gated by `meshes` in the generic format (`js/formats/generic.ts:15`). The Bedrock entity and block formats do not set it (`js/formats/bedrock/bedrock.js:1555-1640`). Cube editing, UV, groups, locators, bounding boxes, animation, controllers and effects are the Bedrock surface.
 - **Bedrock bezier keyframes are baked on export** into samples at `1 / animation.snapping` (`js/formats/bedrock/bedrock_animation.js:475-490`). Keyframe interpolation is therefore an editor-side feature, not a file-format one, for bezier.

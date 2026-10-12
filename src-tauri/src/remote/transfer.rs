@@ -262,7 +262,7 @@ fn upload(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         let mode = crate::platform::mode(&meta.permissions()) & 0o7777;
         // commit (rename) only if the full size arrived, so a cancelled/broken stream never leaves a truncated file
         let script = format!(
-            "mkdir -p -- {d} && t={t}.atelier-tmp.$$ && if cat > \"$t\" && [ \"$(stat -c %s -- \"$t\")\" = {size} ] && chmod {mode:o} \"$t\" && mv -f -- \"$t\" {t}; then :; else rm -f \"$t\"; exit 1; fi",
+            "mkdir -p -- {d} && t={t}.ace-tmp.$$ && if cat > \"$t\" && [ \"$(stat -c %s -- \"$t\")\" = {size} ] && chmod {mode:o} \"$t\" && mv -f -- \"$t\" {t}; then :; else rm -f \"$t\"; exit 1; fi",
             d = ssh::quote(&j.dest_dir),
             t = ssh::quote(&dest),
             size = meta.len()
@@ -328,7 +328,7 @@ fn download(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         fin?;
     } else {
         let dest = Path::new(&j.dest_dir).join(&j.dest_name);
-        let tmp = Path::new(&j.dest_dir).join(format!(".{}.atelier-part", j.dest_name));
+        let tmp = Path::new(&j.dest_dir).join(format!(".{}.ace-part", j.dest_name));
         let mut sc = ssh::command(&j.host, false);
         sc.arg(format!("cat -- {}", ssh::quote(src))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let (mut sh, sid) = spawn_tracked(sc, "ssh", &format!("download {name}"))?;
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn bsdtar_rename_roundtrip() {
-        let d = std::env::temp_dir().join(format!("atelier-tarsub-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("ace-tarsub-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("src/my.dir/sub")).unwrap();
         std::fs::write(d.join("src/my.dir/sub/f.txt"), "hi").unwrap();

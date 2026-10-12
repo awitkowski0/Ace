@@ -33,9 +33,10 @@ const CsvTable = L(() => import("./CsvTable"));
 const BbmodelView = L(() => import("./BbmodelView"));
 const McmetaPreview = L(() => import("./McmetaPreview"));
 const StudioView = L(() => import("../../components/animstudio/ui/StudioView"));
+const PackView = L(() => import("../../components/packeditor/ui/PackView"));
 
 export const DUAL_PREVIEWS: Record<DualId, ComponentType<ViewerProps & { text: string; sync: boolean }>> = {
-  svg: SvgPreview, markdown: MarkdownPreview, csv: CsvTable, bbmodel: BbmodelView, mcmeta: McmetaPreview, animstudio: StudioView,
+  svg: SvgPreview, markdown: MarkdownPreview, csv: CsvTable, bbmodel: BbmodelView, mcmeta: McmetaPreview, animstudio: StudioView, pack: PackView,
 };
 
 export function DualPreview({ doc, groupId, text, sync }: { doc: Doc; groupId: string; text: string; sync: boolean }) {

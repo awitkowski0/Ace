@@ -8,7 +8,7 @@ export const layoutStore = createStore<{ active: Active }>({ active: { left: "pr
 
 const key = () => {
   const r = projectStore.get().root;
-  return r ? `atelier.layout.${projectKey(r)}` : null;
+  return r ? `ace.layout.${projectKey(r)}` : null;
 };
 
 function load() {

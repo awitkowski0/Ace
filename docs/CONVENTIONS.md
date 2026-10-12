@@ -1,4 +1,4 @@
-# Atelier conventions (read before changing code)
+# Ace conventions (read before changing code)
 
 Several agents work in this tree at the same time. Stay inside the files you own (see SPEC "Module ownership").
 
@@ -57,15 +57,20 @@ Several agents work in this tree at the same time. Stay inside the files you own
   — opens/focuses the Terminal tool window and starts a new tab. `command` runs in place of an interactive shell;
   for remote hosts it is run via `login_wrap` so `claude` resolves on mc.
 - Terminal internals (splits, tabs, shell integration, Ghostty parity, key table): `docs/TERMINAL.md`. Terminal actions use `context: {toolWindow: "terminal"}`; test hooks for the
-  automation harness are `await __qa.term()` (`src/components/terminal/qa.ts`), suite `scripts/qa/terminal.mjs`. The harness uses a private NSPasteboard (`ATELIER_AUTOMATION`).
+  automation harness are `await __qa.term()` (`src/components/terminal/qa.ts`), suite `scripts/qa/terminal.mjs`. The harness uses a private NSPasteboard (`ACE_AUTOMATION`).
 - Claude sessions / notifications (flip ⌃⌥A, hook channel, transcript fallback): `docs/AI-SESSIONS.md`; test hooks `await __qa.ai()`, suite `scripts/qa/ai.mjs`. `setSpawnHook` (`terminal/spawnHook.ts`) lets a module add a `hookFile` to pty spawns; `tabDecor.badge` (terminal/sessions.ts) and `setToolBadge` (toolwindows/registry.ts) draw tab / stripe badges.
 - Remote fs (owned by remote agent): `fs.*` commands work for any `Location` whose host is an ssh alias.
+
+## Naming (the app was called "Atelier" before)
+Everything is `ace` / `Ace` / `ACE_*` (binary `ace`, bundle id `com.alexw.ace`, localStorage `ace.*`). Env vars are read through
+`crate::appenv` (Rust) / `aceEnv` (scripts/qa/eval.mjs): `ACE_X` wins, the old `ATELIER_X` is still honoured. `src-tauri/src/migrate.rs`
+copies (never moves) the old data/cache/WebKit dirs once at startup, and `src/lib/migrateStorage.ts` copies `atelier.*` localStorage keys to `ace.*`.
 
 ## Automation harness (for testing — NEVER drive the real keyboard)
 Do not use osascript/System Events keystrokes or mouse automation: they hit whatever window Alex has focused.
 Instead (being built by the harness agent; contract fixed here):
-- Launch: `ATELIER_AUTOMATION=1 src-tauri/target/<profile>/atelier <path-or-host:/path>`. Only with that env var, the app
-  listens on a unix socket (`$ATELIER_AUTOMATION_SOCK`, default `$TMPDIR/atelier-automation.sock`, mode 0600). Without it, no socket.
+- Launch: `ACE_AUTOMATION=1 src-tauri/target/<profile>/ace <path-or-host:/path>`. Only with that env var, the app
+  listens on a unix socket (`$ACE_AUTOMATION_SOCK`, default `$TMPDIR/ace-automation.sock`, mode 0600). Without it, no socket.
 - `node scripts/qa/eval.mjs '<async JS body>'` (the request ends with a NUL byte; Node's `socket.end()` alone sometimes never delivers FIN, which used to surface as random "client timeout"s) runs JS in the webview and prints the JSON-serialised return value.
   Helpers on `window.__qa`: `key("meta L")` (IntelliJ keystroke syntax, dispatched as real-shaped keydown/keyup on the
   focused element), `tap("Shift")`, `type(text)` (Monaco: via `editor.trigger("keyboard","type",{text})`; inputs: value+input
@@ -76,9 +81,9 @@ Instead (being built by the harness agent; contract fixed here):
   `app.ev(body, {window})`); default = the active (last focused) project window. `__qa.windows()` lists windows (tab order, project,
   focused), `__qa.winDebug()` returns AppKit facts (tabbingIdentifier, tabbingMode, tabbedWindows, Window-menu titles), `__qa.openFlow(path, mode?)`
   is the user-level open (dedupe + This/New Window dialog), `__qa.runAction(id)`, `__qa.listen` (the window-scoped listen). Harness launches get their own
-  `ATELIER_DATA_DIR` (session.json) and single-instance identity (derived from the automation socket), so they never touch a real Atelier;
-  a second `atelier <path>` with the same env joins the first instance. `scripts/qa/multiproject.mjs` is the multi-project suite.
-- `scripts/qa/shot.sh <name>` captures the Atelier window (works while unfocused) into `scripts/qa/out/<name>.png`.
+  `ACE_DATA_DIR` (session.json) and single-instance identity (derived from the automation socket), so they never touch a real Ace;
+  a second `ace <path>` with the same env joins the first instance. `scripts/qa/multiproject.mjs` is the multi-project suite.
+- `scripts/qa/shot.sh <name>` captures the Ace window (works while unfocused) into `scripts/qa/out/<name>.png`.
 - QA runs that open Alex's real projects must never save: check `state()` has no dirty tabs before closing, and
   `git -C <project> status --porcelain` before/after must be identical.
 

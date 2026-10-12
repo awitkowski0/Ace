@@ -9,7 +9,7 @@
 - [shell] two identical magnifier icons in the left stripe (Find + Usages) — merge Usages into Find tool window (IntelliJ shows usages in Find) or give distinct icons.
 - [tree] no VCS/ignored colouring in the Project tree (IntelliJ colours modified/new files and dims ignored dirs like .godot/build).
 
-- [procs] CRITICAL: tracked children (headless Godot) survive when Atelier gets SIGTERM/SIGINT/SIGHUP or crashes — RunEvent::Exit never fires. Fix: signal handler (signal-hook) → procs::kill_all + ssh::close_all → exit; spawn children in their own process group and kill the group; write a pidfile of tracked children (pid + start time) in the app data dir and reap stale ones on next launch (verify start time to avoid killing a reused pid).
+- [procs] CRITICAL: tracked children (headless Godot) survive when Ace gets SIGTERM/SIGINT/SIGHUP or crashes — RunEvent::Exit never fires. Fix: signal handler (signal-hook) → procs::kill_all + ssh::close_all → exit; spawn children in their own process group and kill the group; write a pidfile of tracked children (pid + start time) in the app data dir and reap stale ones on next launch (verify start time to avoid killing a reused pid).
 
 ## Carried over from module reports
 - [terminal] add tauri-plugin-opener; route xterm web-links + any external URLs through it
@@ -41,7 +41,7 @@
 
 ## Final perf pass (done 2026-10-10, numbers in docs/PERF.md)
 - [x] [lsp] headless Godot SIGSTOP after 20s without LSP traffic / focused .gd editor, SIGCONT before the next message; never touches a user-launched Godot on 6005; widget "GDScript: paused". Verified on Thematic: Godot 7% -> 0.00% CPU, resume + first completion 167 ms (warm 159 ms). Pause is skipped while a .gd tab is focused (Godot then idles at ~3-13%; it is an external tool).
-- [x] [perf] re-measured with no other Atelier/WebKit instance running (bench now locks the WebKit helper set 1.5 s after launch and records `webkitAlreadyRunning`).
+- [x] [perf] re-measured with no other Ace/WebKit instance running (bench now locks the WebKit helper set 1.5 s after launch and records `webkitAlreadyRunning`).
 - [x] [editor] clean background tabs beyond the 3 most recent lose their Monaco model (text + view state kept; edited/dirty models are kept so undo survives). Language workers were already lazy (only the editor worker exists with .gd/.md open). Saves little RSS (~10 MB), see PERF notes.
 - [x] [terminal] webgl/canvas addons were already dynamic `import()`s loaded on first visible Terminal attach (separate chunks); xterm core stays in the main chunk (making `createSession` async would change the openTerminal contract).
 - [x] [perf] sampled app + WebContent idle: remaining wakeups are WebKit's caret animation for a focused editable (not fixable from app code); unfocused window = 0.1% app+WebKit. Daemons/Claude/Processes pollers now also skip when the window is unfocused and catch up on focus.

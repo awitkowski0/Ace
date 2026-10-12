@@ -4,7 +4,7 @@ import { DEFAULT_OPEN, type Row } from "./tree";
 
 export const godotUi = createStore<{ selected: Row | null; open: Set<string>; rev: number }>({ selected: null, open: new Set(DEFAULT_OPEN), rev: 0 });
 
-const storeKey = () => { const r = projectStore.get().root; return r ? `atelier.godot.open.${projectKey(r)}` : null; };
+const storeKey = () => { const r = projectStore.get().root; return r ? `ace.godot.open.${projectKey(r)}` : null; };
 let loaded = "";
 export function ensureOpen() {
   const k = storeKey() ?? "";

@@ -160,7 +160,7 @@ function EditorGroupView({ id }: { id: string }) {
   const doc = g?.active ? docs[g.active] : undefined;
   const dualPrefs = usePrefs(doc?.key ?? "");
   // == animstudio hook (docs/PROFILES.md): Asset Dev opens geo/animation/bbmodel straight in the Studio and hides the Editor|Studio toggle
-  const assetStudio = useProfile() === "asset" && doc?.dual === "animstudio";
+  const assetStudio = useProfile() === "asset" && (doc?.dual === "animstudio" || doc?.dual === "pack");
   useEffect(() => { if (doc?.viewer && activeGroup === id) viewerRef.current?.focus({ preventScroll: true }); }, [doc?.key, doc?.viewer]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!g) return null;
   const isActiveGroup = activeGroup === id;

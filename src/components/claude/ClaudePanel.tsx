@@ -13,7 +13,7 @@ import { aiStore, attnFor, isOptedIn, paneForSession, toggleOptIn, clearAttn, sk
 import "./claude.css";
 import { fileManagerName } from "../../lib/platform";
 
-const HOST_KEY = "atelier.claude.host";
+const HOST_KEY = "ace.claude.host";
 const readHost = () => {
   try {
     return localStorage.getItem(HOST_KEY) || "local";

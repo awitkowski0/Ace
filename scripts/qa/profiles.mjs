@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Profiles suite (docs/PROFILES.md): Developer unchanged, Asset Dev gating, Assets tree, Asset Bar flows
 // (Get latest / Branch / Save to Git / newer-version notice / Run Game) against a SCRATCH git repo + bare remote in a temp dir.
-// Drives the app only through the ATELIER_AUTOMATION harness (never the real keyboard/mouse). Git write operations only ever touch the scratch repos;
+// Drives the app only through the ACE_AUTOMATION harness (never the real keyboard/mouse). Git write operations only ever touch the scratch repos;
 // the real Thematic-Collections* repos are checked (status + HEAD) before and after and must be identical.
-// Usage: node scripts/qa/profiles.mjs [--no-run] [--thematic]       Env: ATELIER_BIN
+// Usage: node scripts/qa/profiles.mjs [--no-run] [--thematic]       Env: ACE_BIN
 //   --no-run    skip the Run Game part (needs Gradle + a JDK)
 //   --thematic  also open ~/IdeaProjects/Thematic-Collections READ ONLY and check Run Game discovery + asset tree there
 import { execFileSync, execSync } from "node:child_process";
@@ -14,7 +14,7 @@ import { launch, sleep } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const home = os.homedir();
-const real = fs.readdirSync(path.join(home, "IdeaProjects")).filter((n) => n.startsWith("Thematic-Collections")).map((n) => path.join(home, "IdeaProjects", n)).concat([path.join(home, "IdeaProjects/Atelier")]);
+const real = fs.readdirSync(path.join(home, "IdeaProjects")).filter((n) => n.startsWith("Thematic-Collections")).map((n) => path.join(home, "IdeaProjects", n)).concat([path.join(home, "IdeaProjects/Ace")]);
 const snap = (d) => { try { return execSync("git status --porcelain | md5; git rev-parse HEAD", { cwd: d, encoding: "utf8", shell: "/bin/zsh" }).trim(); } catch { return "n/a"; } };
 const before = Object.fromEntries(real.map((d) => [d, snap(d)]));
 
@@ -394,8 +394,8 @@ try {
 }
 
 // ---- the real repos must be untouched ----
-await check("Real repos untouched (Thematic-Collections*: status + HEAD identical; Atelier HEAD unchanged)", async () => {
-  const bad = real.filter((d) => { const a = snap(d); return d.endsWith("Atelier") ? a.split("\n").pop() !== before[d].split("\n").pop() : a !== before[d]; });
+await check("Real repos untouched (Thematic-Collections*: status + HEAD identical; Ace HEAD unchanged)", async () => {
+  const bad = real.filter((d) => { const a = snap(d); return d.endsWith("Ace") ? a.split("\n").pop() !== before[d].split("\n").pop() : a !== before[d]; });
   return { ok: !bad.length, note: bad.length ? "CHANGED: " + bad.join(",") : `${real.length} repos compared` };
 });
 const failed = rows.filter((r) => !r.ok);

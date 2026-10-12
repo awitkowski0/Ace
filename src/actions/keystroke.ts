@@ -102,7 +102,7 @@ export function strokeFromEvent(e: KeyboardEvent): string | null {
  *   Ctrl+Alt             -> control   ⌃X   is Ctrl+Alt+X     (⌃ bindings; ⌃⌥X is Ctrl+Alt+X too, see priority below)
  *   Ctrl+Alt             -> meta alt  ⌘⌥X  is Ctrl+Alt+X     (last resort, after the two ⌃ forms)
  *   Alt, Shift           -> alt, shift (unchanged)
- *   Win (metaKey)        -> ignored (never part of an Atelier shortcut; the OS reserves most Win chords anyway)
+ *   Win (metaKey)        -> ignored (never part of an Ace shortcut; the OS reserves most Win chords anyway)
  *
  * Collision resolution: Ctrl+Alt+X has three possible meanings (⌃⌥X, ⌃X, ⌘⌥X). strokeCandidates returns them in that
  * order and the dispatcher takes the first one that is bound and runs, so ⌃⌥X wins over ⌃X, and ⌃X wins over ⌘⌥X.

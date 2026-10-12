@@ -33,7 +33,7 @@ export interface AiSettings {
 export const DEFAULT_SETTINGS: AiSettings = {
   notifyDone: true, notifyQuestion: true, onlyWhenUnfocused: true, sound: false, hooks: true, watchProject: true, pendingSecs: 30, jumpOnActivate: true,
 };
-const SKEY = "atelier.ai.settings";
+const SKEY = "ace.ai.settings";
 const readSettings = (): AiSettings => {
   try {
     return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SKEY) ?? "{}") };
@@ -304,7 +304,7 @@ export const HOOK_GRACE_MS = 1500;
 
 /** Sessions the user opted in to ("Notify When Done" on a session row); persisted per machine. */
 export interface OptIn { host: string; id: string; file: string }
-const OKEY = "atelier.ai.optin";
+const OKEY = "ace.ai.optin";
 export const optIns = (): OptIn[] => { try { return JSON.parse(localStorage.getItem(OKEY) ?? "[]"); } catch { return []; } };
 export const isOptedIn = (host: string, id: string) => optIns().some((o) => o.host === host && o.id === id);
 export function toggleOptIn(o: OptIn) {

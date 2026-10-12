@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Terminal memory + keystroke->echo latency probe (works on any build; harness only, no OS input).
-// Usage: node scripts/qa/termperf.mjs   Env: ATELIER_BIN
+// Usage: node scripts/qa/termperf.mjs   Env: ACE_BIN
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,7 +10,7 @@ import { launch, sleep } from "./lib.mjs";
 const sh = (c) => { try { return execSync(c, { encoding: "utf8" }).trim(); } catch { return ""; } };
 const wkPids = () => new Set(sh(`ps -axo pid=,command= | grep -E 'com.apple.WebKit.(WebContent|GPU|Networking)' | grep -v grep | awk '{print $1}'`).split("\n").filter(Boolean));
 const rss = (pids) => Math.round(pids.reduce((s, p) => s + (+sh(`ps -o rss= -p ${p}`) || 0), 0) / 1024);
-const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "atelier-perf-"));
+const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "ace-perf-"));
 fs.writeFileSync(path.join(scratch, "a.txt"), "x\n");
 const wk0 = wkPids();
 const app = await launch(scratch);

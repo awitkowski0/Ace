@@ -17,7 +17,7 @@ import { repoConfigStore } from "../../lib/repoConfig";
 import "./gradle.css";
 
 const OPEN_DEFAULT = ["pinned", "proj::", "tasks::"];
-const storeKey = () => { const r = projectStore.get().root; return r ? `atelier.gradle.open.${projectKey(r)}` : null; };
+const storeKey = () => { const r = projectStore.get().root; return r ? `ace.gradle.open.${projectKey(r)}` : null; };
 function loadOpen(): Set<string> {
   try { const k = storeKey(); const v = k && localStorage.getItem(k); if (v) return new Set(JSON.parse(v) as string[]); } catch { /* ignore */ }
   return new Set(OPEN_DEFAULT);

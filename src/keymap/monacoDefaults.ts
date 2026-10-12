@@ -14,7 +14,7 @@ export async function readMonacoDefaults(): Promise<MonacoBinding[]> {
     const raw = it.keybinding?.chords as any[] | undefined;
     if (!it.command || !raw?.length || it.command.startsWith("-")) continue;
     // Monaco's CtrlCmd is metaKey on mac and ctrlKey elsewhere. Off mac, Monaco's Ctrl chords are our ⌘ ("meta");
-    // Monaco's WinCtrl (metaKey) is dropped because Windows keys never reach Atelier shortcuts (see keystroke.ts).
+    // Monaco's WinCtrl (metaKey) is dropped because Windows keys never reach Ace shortcuts (see keystroke.ts).
     const chords: RawChord[] = raw.map((c) => ({
       ctrl: mac ? !!c.ctrlKey : false, alt: !!c.altKey, shift: !!c.shiftKey, meta: mac ? !!c.metaKey : !!c.ctrlKey, keyCode: c.keyCode,
       key: ourKeyName(KeyCodeUtils.toString(c.keyCode)),

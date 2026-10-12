@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // File tree QA: multi-select, Cut/Copy/Paste/Duplicate (Finder-style names), Finder pasteboard interop, context menu, drag-and-drop, Trash.
 // Works ONLY in a scratch dir under the session scratchpad, driven through the automation harness (synthetic events, no OS input).
-// The file pasteboard is a private NSPasteboard under ATELIER_AUTOMATION, so the real clipboard is never touched.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/filetree.mjs
+// The file pasteboard is a private NSPasteboard under ACE_AUTOMATION, so the real clipboard is never touched.
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/filetree.mjs
 import fs from "node:fs";
 import path from "node:path";
 import { launch, sleep } from "./lib.mjs";

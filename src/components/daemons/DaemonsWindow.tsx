@@ -19,7 +19,7 @@ const COLS: { key: SortKey; title: string; w: string; num?: boolean }[] = [
   { key: "busy", title: "State", w: "60px" },
   { key: "cwd", title: "Project dir", w: "auto" },
 ];
-const KIND_ORDER: Record<string, number> = { gradle: 0, kotlin: 1, java: 2, lsp: 3, claude: 4, atelier: 5, minecraft: 6 };
+const KIND_ORDER: Record<string, number> = { gradle: 0, kotlin: 1, java: 2, lsp: 3, claude: 4, ace: 5, minecraft: 6 };
 
 const errMsg = (e: unknown) => (typeof e === "string" ? e : (e as Error)?.message ?? String(e));
 const short = (p: string | null) => (p ? homeShorten(p) : "");

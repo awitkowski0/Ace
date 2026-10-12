@@ -31,17 +31,17 @@ use tauri::{AppHandle, WebviewWindow};
 /// One line per hook call: "<pane id> <single-line hook json>". A single printf = a single write(2) on an O_APPEND file,
 /// so concurrent hooks cannot interleave. No-op when the env is missing (e.g. settings reused outside Ace).
 #[cfg(any(not(windows), test))]
-const HOOK_CMD: &str = r#"[ -n "$ATELIER_HOOK_FILE" ] && printf "%s %s\n" "$ATELIER_PANE" "$(tr "\n" " ")" >> "$ATELIER_HOOK_FILE"; exit 0"#;
+const HOOK_CMD: &str = r#"[ -n "$ACE_HOOK_FILE" ] && printf "%s %s\n" "$ACE_PANE" "$(tr "\n" " ")" >> "$ACE_HOOK_FILE"; exit 0"#;
 
 /// The same line for Windows (no sh needed; Claude Code runs hooks through Git Bash or cmd). PowerShell reads the hook JSON from
-/// stdin, joins it into one line, and appends `<pane> <json>` to `$env:ATELIER_HOOK_FILE` as UTF-8 without a BOM (Out-File would add
+/// stdin, joins it into one line, and appends `<pane> <json>` to `$env:ACE_HOOK_FILE` as UTF-8 without a BOM (Out-File would add
 /// one and corrupt the first line). The script goes in as -EncodedCommand (base64 UTF-16LE) so neither cmd nor bash touches its quoting.
 /// Unlike the unix line this runs PowerShell per hook call (~0.3 s); the hook timeout is 5 s.
 #[cfg(any(windows, test))]
 fn win_hook_cmd() -> String {
     use base64::Engine as _;
-    const PS: &str = "if ($env:ATELIER_HOOK_FILE) { $j = [Console]::In.ReadToEnd() -replace '[\\r\\n]+', ' '; \
-[IO.File]::AppendAllText($env:ATELIER_HOOK_FILE, $env:ATELIER_PANE + ' ' + $j + [char]10, (New-Object System.Text.UTF8Encoding $false)) }";
+    const PS: &str = "if ($env:ACE_HOOK_FILE) { $j = [Console]::In.ReadToEnd() -replace '[\\r\\n]+', ' '; \
+[IO.File]::AppendAllText($env:ACE_HOOK_FILE, $env:ACE_PANE + ' ' + $j + [char]10, (New-Object System.Text.UTF8Encoding $false)) }";
     let utf16: Vec<u8> = PS.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
     format!("powershell -NoProfile -NonInteractive -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(utf16))
 }
@@ -71,11 +71,11 @@ const PASSTHROUGH: &[&str] = &[
 ];
 const PASSTHROUGH_FLAGS: &[&str] = &["-p", "--print", "-h", "--help", "-v", "--version", "--bg"];
 
-/// Binary used for hook-wrapped launches: `claude`, or `ATELIER_CLAUDE_BIN` (local) / `ATELIER_CLAUDE_BIN_<HOST>` (remote) when set
+/// Binary used for hook-wrapped launches: `claude`, or `ACE_CLAUDE_BIN` (local) / `ACE_CLAUDE_BIN_<HOST>` (remote) when set
 /// (point Ace at another build; the automation tests use it to run a fake claude instead of a real, usage-consuming session).
 fn claude_bin(host: &str) -> String {
-    let var = if host == "local" { "ATELIER_CLAUDE_BIN".to_string() } else { format!("ATELIER_CLAUDE_BIN_{}", host.to_uppercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_")) };
-    std::env::var(var).ok().filter(|v| !v.is_empty()).map(|v| ssh::quote(&v)).unwrap_or_else(|| "claude".into())
+    let var = if host == "local" { "ACE_CLAUDE_BIN".to_string() } else { format!("ACE_CLAUDE_BIN_{}", host.to_uppercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_")) };
+    crate::appenv::var(&var).ok().filter(|v| !v.is_empty()).map(|v| ssh::quote(&v)).unwrap_or_else(|| "claude".into())
 }
 
 /// `claude ...` -> `claude --settings '<hooks json>' ...` (only for interactive session launches).
@@ -96,14 +96,14 @@ pub fn wrap_command(cmd: &str, host: &str) -> Option<String> {
     Some(format!("{} --settings {}{}{}", claude_bin(host), ssh::quote(settings_json()), plugin, rest))
 }
 
-/// Directory of the bundled `ace-studio` Claude Code plugin, if this build can find one: `ATELIER_ACE_PLUGIN` (empty = disabled),
+/// Directory of the bundled `ace-studio` Claude Code plugin, if this build can find one: `ACE_PLUGIN` (empty = disabled),
 /// else `<repo>/plugins/ace-studio` next to the binary (dev builds) or `Resources/plugins/ace-studio` (app bundle). It must contain
 /// the built server (`server/ace-mcp.mjs`, `pnpm build:mcp`).
 pub fn plugin_dir() -> Option<&'static str> {
     static P: OnceLock<Option<String>> = OnceLock::new();
     P.get_or_init(|| {
         let ok = |d: &Path| d.join(".claude-plugin/plugin.json").is_file() && d.join("server/ace-mcp.mjs").is_file();
-        if let Some(v) = std::env::var_os("ATELIER_ACE_PLUGIN") {
+        if let Some(v) = crate::appenv::var_os_or("ACE_PLUGIN", "ATELIER_ACE_PLUGIN") {
             let d = PathBuf::from(v);
             return (!d.as_os_str().is_empty() && ok(&d)).then(|| d.to_string_lossy().into_owned());
         }
@@ -121,9 +121,9 @@ pub fn plugin_dir() -> Option<&'static str> {
 
 /// `NAME='v' ` assignments (shell prefix) that carry the channel into the claude process / interactive shell.
 pub fn env_prefix(hook_file: &str, pane: &str, with_settings: bool) -> String {
-    let mut s = format!("ATELIER_HOOK_FILE={} ATELIER_PANE={} ", ssh::quote(hook_file), ssh::quote(pane));
+    let mut s = format!("ACE_HOOK_FILE={} ACE_PANE={} ", ssh::quote(hook_file), ssh::quote(pane));
     if with_settings {
-        s.push_str(&format!("ATELIER_CLAUDE_SETTINGS={} ", ssh::quote(settings_json())));
+        s.push_str(&format!("ACE_CLAUDE_SETTINGS={} ", ssh::quote(settings_json())));
     }
     s
 }
@@ -811,7 +811,7 @@ mod tests {
         let b = base64::engine::general_purpose::STANDARD.decode(c.rsplit(' ').next().unwrap()).unwrap();
         let units: Vec<u16> = b.chunks(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect();
         let ps = String::from_utf16(&units).unwrap();
-        assert!(ps.contains("$env:ATELIER_HOOK_FILE") && ps.contains("$env:ATELIER_PANE") && ps.contains("UTF8Encoding $false"), "{ps}");
+        assert!(ps.contains("$env:ACE_HOOK_FILE") && ps.contains("$env:ACE_PANE") && ps.contains("UTF8Encoding $false"), "{ps}");
         assert!(!ps.contains('\n'));
     }
 
@@ -848,7 +848,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ace-hook-test-{}", nonce()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("h.log");
-        let mut c = Command::new("sh").arg("-c").arg(HOOK_CMD).env("ATELIER_HOOK_FILE", &f).env("ATELIER_PANE", "p1").stdin(Stdio::piped()).spawn().unwrap();
+        let mut c = Command::new("sh").arg("-c").arg(HOOK_CMD).env("ACE_HOOK_FILE", &f).env("ACE_PANE", "p1").stdin(Stdio::piped()).spawn().unwrap();
         use std::io::Write;
         c.stdin.take().unwrap().write_all(b"{\"hook_event_name\":\"Stop\",\n\"session_id\":\"s\"}\n").unwrap();
         assert!(c.wait().unwrap().success());
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(pane, "p1");
         assert_eq!(serde_json::from_str::<Value>(json).unwrap()["hook_event_name"], "Stop");
         // without the env var: succeeds silently
-        let st = Command::new("sh").arg("-c").arg(HOOK_CMD).env_remove("ATELIER_HOOK_FILE").stdin(Stdio::null()).status().unwrap();
+        let st = Command::new("sh").arg("-c").arg(HOOK_CMD).env_remove("ACE_HOOK_FILE").stdin(Stdio::null()).status().unwrap();
         assert!(st.success());
         let _ = std::fs::remove_dir_all(&dir);
     }

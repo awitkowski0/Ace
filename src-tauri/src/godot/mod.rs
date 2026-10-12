@@ -378,7 +378,7 @@ pub fn release_window(label: &str) {
 // ---------------------------------------------------------------- open the real editor
 
 /// Launch the Godot editor on the project (optionally on a scene). Detached and NOT tracked: it is Alex's editor, it must
-/// survive Ace. With `ATELIER_GODOT_LAUNCH_LOG=<file>` the argv is appended to that file instead of launching (tests).
+/// survive Ace. With `ACE_GODOT_LAUNCH_LOG=<file>` the argv is appended to that file instead of launching (tests).
 #[tauri::command]
 pub fn godot_open_editor(project: String, scene: Option<String>, godot: Option<String>) -> Result<Vec<String>, String> {
     let bin = find_godot(godot.as_deref()).ok_or("Godot executable not found")?;
@@ -386,7 +386,7 @@ pub fn godot_open_editor(project: String, scene: Option<String>, godot: Option<S
     if let Some(s) = scene.filter(|s| !s.is_empty()) {
         argv.push(s);
     }
-    if let Ok(log) = std::env::var("ATELIER_GODOT_LAUNCH_LOG") {
+    if let Ok(log) = crate::appenv::var("ACE_GODOT_LAUNCH_LOG") {
         if !log.is_empty() {
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&log).map_err(|e| e.to_string())?;
             writeln!(f, "{}", serde_json::to_string(&argv).unwrap_or_default()).map_err(|e| e.to_string())?;

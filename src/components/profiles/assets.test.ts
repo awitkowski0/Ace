@@ -83,3 +83,17 @@ describe("branches + templates", () => {
     expect(JSON.parse(animationTemplate("run")).animations["animation.run.idle"]).toBeTruthy();
   });
 });
+
+describe("pack editor files are assets", () => {
+  it("suits, HUDs, flight profiles and guide pages get their own groups", () => {
+    const r = "src/packs/heroes/resources";
+    expect(classifyAsset(`${r}/data/thematic/armors/avengers/iron_man.json`)).toMatchObject({ type: "suit", name: "iron_man", sub: "avengers", inTree: true });
+    expect(classifyAsset(`${r}/data/thematic/huds/gun_default.js`)).toMatchObject({ type: "hud", name: "gun_default" });
+    expect(classifyAsset(`${r}/data/thematic/flight_profiles/repulsor.json`)).toMatchObject({ type: "flight" });
+    expect(classifyAsset(`${r}/assets/thematic/guide/thematic/en_us/entries/suits/ultron.json`)).toMatchObject({ type: "guide", name: "ultron", sub: "suits" });
+    expect(classifyAsset(`${r}/data/thematic/abilities/ultron/hive_control.js`)).toBeNull();
+    expect(classifyAsset(`${r}/data/thematic/armors/readme.md`)).toBeNull();
+    const g = groupAssets([`${r}/data/thematic/armors/avengers/iron_man.json`, `${r}/data/thematic/huds/gun_default.js`]).map((x) => x.label);
+    expect(g).toEqual(["Suits", "HUDs"]);
+  });
+});

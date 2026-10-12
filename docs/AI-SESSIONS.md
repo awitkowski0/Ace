@@ -37,11 +37,11 @@ Tests: `node scripts/qa/ai.mjs` (needs the automation harness; uses `scripts/qa/
      window and host, created when the first terminal for that host spawns, registered with `procs::register_for(window, "claude-hooks", ..)`,
      killed with the window. stdin EOF (window closed, Ace crashed) also ends it and the script's trap removes the file. No polling anywhere:
      `tail -F` is inotify/kqueue driven. Rust parses lines and emits `claude://hook` to that window only.
-   - Plain `claude` in an Ace shell: the pty gets `ATELIER_HOOK_FILE`, `ATELIER_PANE`, `ATELIER_CLAUDE_SETTINGS`; the zsh/bash integration (private
+   - Plain `claude` in an Ace shell: the pty gets `ACE_HOOK_FILE`, `ACE_PANE`, `ACE_CLAUDE_SETTINGS`; the zsh/bash integration (private
      ZDOTDIR / rcfile, loaded after the user's rc files) defines a `claude` function that adds `--settings` (not for subcommands such as `mcp`,
      `update`, nor for `-p/--print/-h/-v`; not defined when the user has their own `claude` alias/function). Remote bash gets the same
      function through the existing pipe-fed rcfile and an `export` prefix; nothing is written on the remote host except the /tmp hook file.
-   - `ATELIER_CLAUDE_BIN` (local) / `ATELIER_CLAUDE_BIN_<HOST>` (e.g. `_MC`) replace the `claude` binary in hook-wrapped launches (tests).
+   - `ACE_CLAUDE_BIN` (local) / `ACE_CLAUDE_BIN_<HOST>` (e.g. `_MC`) replace the `claude` binary in hook-wrapped launches (tests).
 2. **Transcript fallback** (sessions Ace did not launch, e.g. your own Ghostty): the shared notify watcher on `~/.claude/projects` (already used by
    the sessions list) feeds changed `*.jsonl` files to `claude_hooks::on_paths`; the last 256 KB are analysed: assistant `stop_reason: end_turn`
    = finished; trailing `AskUserQuestion`/`ExitPlanMode` tool_use = question; any other trailing `tool_use` = "pending", which becomes
@@ -49,7 +49,7 @@ Tests: `node scripts/qa/ai.mjs` (needs the automation harness; uses `scripts/qa/
    Scope (noise control): only sessions whose project folder is the **current project's** local cwd, plus sessions you opt in to
    (session context menu "Notify When Done / Needs Input"; for `mc` sessions that is a `tail -F` over ssh, since mc has no inotify tools).
    A state that is already old when first seen (> 20 s) is not announced; sessions that report through hooks are ignored here.
-   `ATELIER_CLAUDE_PROJECTS` overrides the projects dir (tests; it also disables the on-disk session cache so synthetic data never lands in it).
+   `ACE_CLAUDE_PROJECTS` overrides the projects dir (tests; it also disables the on-disk session cache so synthetic data never lands in it).
 
 ## Delivery rules
 

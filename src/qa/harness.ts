@@ -1,4 +1,4 @@
-/** window.__qa helpers (installed only under ATELIER_AUTOMATION=1). See docs/CONVENTIONS.md "Automation harness". */
+/** window.__qa helpers (installed only under ACE_AUTOMATION=1). See docs/CONVENTIONS.md "Automation harness". */
 import { key, tap } from "./keys";
 import { editorStore, openFile } from "../editor/store";
 import { activeEditor } from "../editor/editorRegistry";

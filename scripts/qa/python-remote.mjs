@@ -2,7 +2,7 @@
 // Remote (ssh alias `mc`) Python checks. Opens a SCRATCH project mc:/tmp/ace-qa-<pid> (removed afterwards) and drives it through the harness.
 // mc has only /usr/bin/python3 (no pip/uv/debugpy/pytest): the scratch .venv is made with `python3 -m venv --without-pip` and the pure-Python
 // debugpy wheel (downloaded locally to a temp dir) is unzipped into ITS site-packages, so nothing outside /tmp/ace-qa-* on mc is touched.
-// Usage: node scripts/qa/python-remote.mjs      Env: ATELIER_BIN
+// Usage: node scripts/qa/python-remote.mjs      Env: ACE_BIN
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

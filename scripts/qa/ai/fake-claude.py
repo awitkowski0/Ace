@@ -24,8 +24,12 @@ if settings:
     cfg = json.loads(settings) if settings.lstrip().startswith("{") else json.load(open(settings))
 hooks = cfg.get("hooks", {})
 cwd = os.getcwd()
+def _env(n):
+    return os.environ.get("ACE_" + n) or os.environ.get("ATELIER_" + n)
+
+
 here = os.path.dirname(os.path.realpath(__file__))
-root = os.environ.get("ATELIER_CLAUDE_PROJECTS") or os.path.join(here, "transcripts")
+root = _env("CLAUDE_PROJECTS") or os.path.join(here, "transcripts")
 folder = "".join(c if c.isalnum() else "-" for c in cwd)
 tdir = os.path.join(root, folder)
 os.makedirs(tdir, exist_ok=True)
@@ -46,8 +50,8 @@ def fire(event, **extra):
             if h.get("type") == "command":
                 subprocess.run(h["command"], shell=True, input=json.dumps(payload, indent=2).encode(), timeout=h.get("timeout", 60))
 
-with open(os.environ.get("ATELIER_FAKE_ARGS") or os.path.join(here, "args.log"), "a") as f:
-    f.write(json.dumps({"argv": args, "sid": sid, "env_hook_file": os.environ.get("ATELIER_HOOK_FILE"), "pane": os.environ.get("ATELIER_PANE"), "cwd": cwd}) + "\n")
+with open(_env("FAKE_ARGS") or os.path.join(here, "args.log"), "a") as f:
+    f.write(json.dumps({"argv": args, "sid": sid, "env_hook_file": _env("HOOK_FILE"), "pane": _env("PANE"), "cwd": cwd}) + "\n")
 if not os.path.exists(tpath):
     rec(type="user", message={"role": "user", "content": "fake session " + sid[:8]})
     rec(type="ai-title", aiTitle="Fake session " + sid[:8])

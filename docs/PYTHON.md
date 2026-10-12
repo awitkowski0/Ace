@@ -33,7 +33,7 @@ Rust (src-tauri/src)                       TS (src/components)
   `ssh -tt host bash -lc 'cd cwd && export ... && exec argv'` through `crate::remote::ssh` (login PATH), so killing the local ssh hangs the remote
   command up. Paths in a remote project are remote paths; the same code serves both.
 * **Persistence.** `pstore.get/set(root, name)`: JSON in `<app data dir>/projects/<fnv(host:path)>/<name>.json` (NOT in the project, honours
-  `ATELIER_DATA_DIR`). Names in use: `python` (interpreter choice + custom interpreters), `runconfigs`, `breakpoints`.
+  `ACE_DATA_DIR`). Names in use: `python` (interpreter choice + custom interpreters), `runconfigs`, `breakpoints`.
 * **Bundled helpers** (never installed into an environment): `src-tauri/src/python/scripts/ace_pytest.py` (pytest plugin, loaded with `-p ace_pytest`,
   directory on PYTHONPATH via `pyApi.scriptsDir()`), `ace_unittest.py`, `ace_console.py`. They emit control events as lines
   `\x1e##ace:{json}` on the real stdout; the Run window strips these from the console.
@@ -94,12 +94,12 @@ Shared by Python now and Gradle / Godot configs later.
 
 `await __qa.py()` returns `{ <area>: {...} }` (each area calls `registerQa("area", {...})` from python/qa.ts). Suite: `node scripts/qa/python.mjs`
 (areas in `scripts/qa/py/<area>.mjs`). Fast QA build: `scripts/qa/qabuild.sh` (separate target dir `src-tauri/target-qa`, serialised with a lock),
-then `ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/python.mjs --only <area>`.
+then `ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/python.mjs --only <area>`.
 
 ## Interpreters and language intelligence (status, Agent D)
 
 * Verified (scripts/qa/py/interp.mjs 18/18, lang.mjs 28/28): status widget, switcher popup, Add Interpreter dialog (Existing/Virtualenv/Conda-existing, remote mc venv),
-  terminal venv activation (zsh via harness, bash via cargo test; setting `atelier.python.terminalActivate`), basedpyright from the interpreter's venv
+  terminal venv activation (zsh via harness, bash via cargo test; setting `ace.python.terminalActivate`), basedpyright from the interpreter's venv
   (completion/hover/F1/⌘B project + site-packages/⌥F7/⇧F6 multi-file/⌘P/⌘F12/Go to Symbol/diagnostics), ruff diagnostics + quick fixes, Reformat Code
   (ruff, range, black fallback), Optimize Imports (ruff, isort fallback), interpreter switch restarts the server, explicit "Install basedpyright" flow.
 * Not exercised: creating a NEW conda env, remote ruff/black (mc has neither), bash activation in the app (cargo test only), terminal activation for remote hosts (skipped by design).

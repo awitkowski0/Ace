@@ -53,10 +53,10 @@ pub struct SpawnOpts {
     pub shell_integration: Option<bool>,
     /// Override of $SHELL (tests).
     pub shell: Option<String>,
-    /// Local interactive shells only: `<venv>/bin/activate`, sourced once at the first prompt (env `ATELIER_ACTIVATE`).
+    /// Local interactive shells only: `<venv>/bin/activate`, sourced once at the first prompt (env `ACE_ACTIVATE`).
     pub activate: Option<String>,
     /// Claude notification channel (docs/AI-SESSIONS.md): file the Stop/Notification hooks append to. `claude ...` commands get
-    /// `--settings <hooks>`; interactive shells get ATELIER_HOOK_FILE/ATELIER_PANE/ATELIER_CLAUDE_SETTINGS for the `claude` wrapper function.
+    /// `--settings <hooks>`; interactive shells get ACE_HOOK_FILE/ACE_PANE/ACE_CLAUDE_SETTINGS for the `claude` wrapper function.
     #[serde(default)]
     pub hook_file: Option<String>,
 }
@@ -77,7 +77,7 @@ fn expand_home(p: &str) -> String {
 }
 
 const ZSHENV: &str = include_str!("shell_integration/zshenv");
-const ZSH_INTEGRATION: &str = include_str!("shell_integration/atelier.zsh");
+const ZSH_INTEGRATION: &str = include_str!("shell_integration/ace.zsh");
 const BASH_RCFILE: &str = include_str!("shell_integration/bash_rcfile");
 
 /// Private directory with the shell-integration files (never the user's dotfiles). Rewritten when the content differs.
@@ -88,10 +88,10 @@ fn integration_dir() -> Option<std::path::PathBuf> {
     }
     static D: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     D.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("atelier-shell-integration-v1-{}", crate::platform::user_tag()));
+        let dir = std::env::temp_dir().join(format!("ace-shell-integration-v1-{}", crate::platform::user_tag()));
         let zsh = dir.join("zsh");
         std::fs::create_dir_all(&zsh).ok()?;
-        for (path, body) in [(zsh.join(".zshenv"), ZSHENV), (zsh.join("atelier.zsh"), ZSH_INTEGRATION), (dir.join("bash_rcfile"), BASH_RCFILE)] {
+        for (path, body) in [(zsh.join(".zshenv"), ZSHENV), (zsh.join("ace.zsh"), ZSH_INTEGRATION), (dir.join("bash_rcfile"), BASH_RCFILE)] {
             if std::fs::read_to_string(&path).ok().as_deref() != Some(body) {
                 std::fs::write(&path, body).ok()?;
             }
@@ -136,9 +136,9 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
             (None, Some(d)) if base == "bash" => {
                 // bash ignores --rcfile for login shells, so the rcfile emulates the login profile itself.
                 cb.args(["--rcfile", d.join("bash_rcfile").to_string_lossy().as_ref(), "-i"]);
-                cb.env("ATELIER_SHELL_INTEGRATION", "1");
+                cb.env("ACE_SHELL_INTEGRATION", "1");
                 if !o.login.unwrap_or(true) {
-                    cb.env("ATELIER_BASH_NOLOGIN", "1");
+                    cb.env("ACE_BASH_NOLOGIN", "1");
                 }
             }
             (None, d) => {
@@ -149,17 +149,17 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
                 if let (Some(d), "zsh") = (d, base.as_str()) {
                     let z = d.join("zsh");
                     if let Ok(orig) = std::env::var("ZDOTDIR") {
-                        cb.env("ATELIER_ZDOTDIR_ORIG", orig);
+                        cb.env("ACE_ZDOTDIR_ORIG", orig);
                     }
                     cb.env("ZDOTDIR", z.to_string_lossy().as_ref());
-                    cb.env("ATELIER_SHELL_INTEGRATION_DIR", z.to_string_lossy().as_ref());
-                    cb.env("ATELIER_SHELL_INTEGRATION", "1");
+                    cb.env("ACE_SHELL_INTEGRATION_DIR", z.to_string_lossy().as_ref());
+                    cb.env("ACE_SHELL_INTEGRATION", "1");
                 }
             }
         }
         if integ && dir.is_some() {
             if let Some(a) = o.activate.as_deref().filter(|a| std::path::Path::new(a).is_file()) {
-                cb.env("ATELIER_ACTIVATE", a);
+                cb.env("ACE_ACTIVATE", a);
             }
         }
         let cwd = expand_home(&o.cwd);
@@ -169,11 +169,11 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
             cb.cwd(h);
         }
         if let (Some(f), Some(id)) = (o.hook_file.as_deref(), o.id.as_deref()) {
-            cb.env("ATELIER_HOOK_FILE", f);
-            cb.env("ATELIER_PANE", id);
-            cb.env("ATELIER_CLAUDE_SETTINGS", crate::claude_hooks::settings_json());
+            cb.env("ACE_HOOK_FILE", f);
+            cb.env("ACE_PANE", id);
+            cb.env("ACE_CLAUDE_SETTINGS", crate::claude_hooks::settings_json());
             if let Some(p) = crate::claude_hooks::plugin_dir() {
-                cb.env("ATELIER_CLAUDE_PLUGIN_DIR", p);
+                cb.env("ACE_CLAUDE_PLUGIN_DIR", p);
             }
         }
     } else {
@@ -215,7 +215,7 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
 /// Other remote shells just get their normal login shell.
 pub fn remote_integration_command(cd: &str) -> String {
     let b64 = B64.encode(BASH_RCFILE);
-    let inner = format!("ATELIER_SHELL_INTEGRATION=1 exec bash --rcfile <(printf %s {b64} | base64 -d) -i");
+    let inner = format!("ACE_SHELL_INTEGRATION=1 exec bash --rcfile <(printf %s {b64} | base64 -d) -i");
     format!("{cd} && if [ \"${{SHELL##*/}}\" = bash ]; then exec bash -c {}; else exec $SHELL -l; fi", crate::remote::ssh::quote(&inner))
 }
 
@@ -558,7 +558,7 @@ mod tests {
         let bash = ["/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"].into_iter().find(|p| std::path::Path::new(p).exists());
         let shells: Vec<&str> = ["/bin/zsh"].into_iter().filter(|p| std::path::Path::new(p).exists()).chain(bash).collect();
         for (n, sh) in shells.iter().enumerate() {
-            let out = run_interactive_with(sh, &format!("act{n}"), &["echo \"A=<$ACE_ACT_TEST> N=<$ACE_ACT_COUNT> E=<${ATELIER_ACTIVATE-unset}>\"", "exit"], Some(act.to_string_lossy().into_owned()));
+            let out = run_interactive_with(sh, &format!("act{n}"), &["echo \"A=<$ACE_ACT_TEST> N=<$ACE_ACT_COUNT> E=<${ACE_ACTIVATE-unset}>\"", "exit"], Some(act.to_string_lossy().into_owned()));
             assert!(out.contains("A=<on-42> N=<1> E=<unset>"), "{sh}: {out:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);

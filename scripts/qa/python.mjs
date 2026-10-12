@@ -2,7 +2,7 @@
 // Python suite (docs/PYTHON.md). Launches Ace under the automation harness on a SCRATCH project that has its own venv
 // (created with uv; pytest, debugpy, basedpyright, ruff installed THERE only). Drives the app only through window.__qa / __qa.py().
 // Areas live in scripts/qa/py/<area>.mjs and export `async function checks(c)`.
-// Usage: node scripts/qa/python.mjs [--only <area|substring of check name>] [--no-ssh] [--keep]     Env: ATELIER_BIN
+// Usage: node scripts/qa/python.mjs [--only <area|substring of check name>] [--no-ssh] [--keep]     Env: ACE_BIN
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

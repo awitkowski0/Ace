@@ -26,7 +26,7 @@ fn is_local(host: &str) -> bool {
 pub struct ProcRow {
     pub host: String,
     pub pid: u32,
-    pub kind: String, // gradle | kotlin | java | lsp | claude | atelier
+    pub kind: String, // gradle | kotlin | java | lsp | claude | ace
     pub label: String,
     pub version: Option<String>,
     pub rss: u64,
@@ -34,7 +34,7 @@ pub struct ProcRow {
     pub uptime_secs: u64,
     pub cwd: Option<String>,
     pub busy: Option<bool>,
-    pub atelier: bool,
+    pub ace: bool,
     pub cmd: String,
     /// Never part of a bulk action; killing requires typing the PID (Minecraft servers).
     pub guarded: bool,
@@ -269,7 +269,7 @@ fn scan_local() -> Vec<ProcRow> {
         }
         let (kind, ver, label) = match (&c, t) {
             (Some((k, v, l)), _) => (*k, v.clone(), l.clone()),
-            (None, Some(t)) => ("atelier", None, format!("{} {}", t.kind, t.label)),
+            (None, Some(t)) => ("ace", None, format!("{} {}", t.kind, t.label)),
             _ => unreachable!(),
         };
         let start = p.start_time();
@@ -294,7 +294,7 @@ fn scan_local() -> Vec<ProcRow> {
     st.cwd.retain(|k, _| live.contains(k));
     st.hist.retain(|k, _| k.0 != "local" || live.contains(&(k.1, k.2)));
     let mut rows = vec![];
-    for (mut r, kind, ver, label, atelier, start) in found {
+    for (mut r, kind, ver, label, ace, start) in found {
         r.cwd = st.cwd.get(&(r.pid, start)).cloned();
         let (mut kind, mut label) = (kind, label);
         if kind == "java" && r.cwd.as_deref().map_or(false, |c| Path::new(c).join("server.properties").is_file()) {
@@ -307,7 +307,7 @@ fn scan_local() -> Vec<ProcRow> {
         let busy = if kind == "gradle" { Some(busy_of(h)) } else { None };
         rows.push(ProcRow {
             host: "local".into(), pid: r.pid, kind: kind.into(), label, version: ver, rss: r.rss, cpu: r.cpu,
-            uptime_secs: r.uptime, cwd: r.cwd, busy, atelier,
+            uptime_secs: r.uptime, cwd: r.cwd, busy, ace,
             cmd: r.cmd.join(" ").chars().take(400).collect(),
             guarded: kind == "minecraft",
         });
@@ -443,7 +443,7 @@ fn scan_remote(host: &str) -> Result<Vec<ProcRow>, String> {
         rows.push(ProcRow {
             host: host.into(), pid, kind: kind.into(), label, version: ver,
             rss: p["rss"].as_u64().unwrap_or(0), cpu, uptime_secs: (up - start).max(0.0) as u64,
-            cwd: p["cwd"].as_str().map(String::from), busy, atelier: false,
+            cwd: p["cwd"].as_str().map(String::from), busy, ace: false,
             cmd: cmd.join(" ").chars().take(400).collect(),
             guarded: kind == "minecraft",
         });
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn cleanup_on_fake_dirs() {
-        let root = std::env::temp_dir().join(format!("atelier-daemons-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("ace-daemons-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let h = root.join("home");
         for d in [

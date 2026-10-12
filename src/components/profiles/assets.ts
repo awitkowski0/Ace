@@ -1,6 +1,6 @@
 /** Pure asset-file logic for the Asset Dev profile (docs/PROFILES.md): classification, grouping, suggested commit messages, templates. */
 
-export type AssetType = "model" | "animation" | "texture" | "sound" | "lang" | "pose" | "particle" | "controller" | "data" | "other";
+export type AssetType = "model" | "animation" | "texture" | "sound" | "lang" | "pose" | "particle" | "controller" | "suit" | "hud" | "flight" | "guide" | "data" | "other";
 export type AssetKind = "armor" | "item" | "entity" | "block";
 export interface AssetInfo {
   type: AssetType;
@@ -18,7 +18,11 @@ export const ASSET_PATHSPECS = [
   ":(glob)**/assets/**", ":(glob)**/*.bbmodel", ":(glob)**/*.geo.json", ":(glob)**/*.animation.json", ":(glob)**/*.pose",
   ":(glob)**/textures/**", ":(glob)**/sounds/**", ":(glob)**/*_sounds/**",
   ":(glob)**/data/*/anim_controllers/**", ":(glob)**/data/*/poses/**",
+  // pack editor files (docs/PACKEDITOR.md): suits, HUDs, flight profiles
+  ":(glob)**/data/*/armors/**", ":(glob)**/data/*/huds/**", ":(glob)**/data/*/flight_profiles/**",
 ];
+/** data/<namespace>/<folder> trees asset devs work in through the pack editor */
+const PACK_DATA: Record<string, AssetType> = { armors: "suit", huds: "hud", flight_profiles: "flight" };
 
 // ---------- repo config: `.ace/config.json` "assets" section (docs/PROFILES.md) ----------
 type Extra = string | { glob?: unknown; type?: unknown; kind?: unknown };
@@ -127,8 +131,18 @@ function classifyBuiltin(file: string, dirs: string[]): AssetInfo | null {
     if (!isCtl && CODE_EXT.has(extOf(file))) return null;
     return { type: isCtl ? "controller" : "pose", kind: null, name: bareName(file), sub: dirs.slice(di + 3).join("/"), inTree: true };
   }
+  if (di >= 0 && !dirs.includes("assets") && dirs.length > di + 2 && PACK_DATA[dirs[di + 2]]) {
+    const t = PACK_DATA[dirs[di + 2]];
+    const e = extOf(file);
+    if (e !== "json" && !(t === "hud" && e === "js")) return null;
+    return { type: t, kind: null, name: bareName(file), sub: dirs.slice(di + 3).join("/"), inTree: true };
+  }
   const ext = extOf(file);
   const ai = dirs.indexOf("assets");
+  // assets/<namespace>/guide/<book>/<lang>/(entries|categories)/**: the guide book's pages
+  if (ai >= 0 && dirs[ai + 2] === "guide" && ext === "json" && (dirs[ai + 5] === "entries" || dirs[ai + 5] === "categories")) {
+    return { type: "guide", kind: null, name: bareName(file), sub: dirs.slice(ai + 6).join("/"), inTree: true };
+  }
   if (ai >= 0 && lower === "sounds.json" && dirs.length === ai + 2) return { type: "sound", kind: null, name: "sounds", sub: "", inTree: true };
 
   let type: AssetType | null = null;
@@ -168,17 +182,17 @@ function classifyBuiltin(file: string, dirs: string[]): AssetInfo | null {
 
 export const isAssetPath = (rel: string) => classifyAsset(rel) !== null;
 
-export const TYPE_LABEL: Record<AssetType, string> = { model: "Models", animation: "Animations", texture: "Textures", sound: "Sounds", lang: "Language", pose: "Poses", particle: "Particles", controller: "Animation controllers", data: "Data files", other: "Other files" };
+export const TYPE_LABEL: Record<AssetType, string> = { model: "Models", animation: "Animations", texture: "Textures", sound: "Sounds", lang: "Language", pose: "Poses", particle: "Particles", controller: "Animation controllers", suit: "Suits", hud: "HUDs", flight: "Flight profiles", guide: "Guide book", data: "Data files", other: "Other files" };
 export const KIND_LABEL: Record<AssetKind, string> = { armor: "Armor", item: "Items", entity: "Entities", block: "Blocks" };
-export const TYPE_WORD: Record<AssetType, string> = { model: "model", animation: "animation", texture: "texture", sound: "sound", lang: "text", pose: "pose", particle: "particle", controller: "animation controller", data: "data file", other: "file" };
+export const TYPE_WORD: Record<AssetType, string> = { model: "model", animation: "animation", texture: "texture", sound: "sound", lang: "text", pose: "pose", particle: "particle", controller: "animation controller", suit: "suit", hud: "HUD", flight: "flight profile", guide: "guide page", data: "data file", other: "file" };
 
 export interface AssetFile { path: string; info: AssetInfo }
 export interface AssetSection { id: string; label: string | null; files: AssetFile[] }
 export interface AssetGroup { id: string; label: string; kind: AssetKind | null; sections: AssetSection[]; count: number }
 
-const GROUP_ORDER = ["armor", "item", "entity", "block", "sound", "lang", "pose", "particle", "controller", "data", "misc"];
-const FLAT = new Set(["sound", "lang", "pose", "particle", "controller", "data"]);
-const TYPE_ORDER: AssetType[] = ["model", "animation", "texture", "sound", "lang", "pose", "particle", "controller", "data", "other"];
+const GROUP_ORDER = ["suit", "armor", "item", "entity", "block", "hud", "flight", "guide", "sound", "lang", "pose", "particle", "controller", "data", "misc"];
+const FLAT = new Set(["sound", "lang", "pose", "particle", "controller", "suit", "hud", "flight", "guide", "data"]);
+const TYPE_ORDER: AssetType[] = ["model", "animation", "texture", "sound", "lang", "pose", "particle", "controller", "suit", "hud", "flight", "guide", "data", "other"];
 
 /** Groups tree files by kind (Armor / Items / Entities / Blocks), then by type; sounds, language, poses, particles and controllers get their own flat groups. */
 export function groupAssets(paths: string[], query = ""): AssetGroup[] {

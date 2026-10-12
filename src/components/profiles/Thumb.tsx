@@ -15,6 +15,10 @@ export function AssetIcon({ type, size = 16 }: { type: AssetType; size?: number 
       {type === "pose" && <><circle cx="8" cy="3.5" r="1.6" /><path d="M8 5.5v4M4.5 7l3.5-1 3.5 1M8 9.5l-2.5 4M8 9.5l2.5 4" /></>}
       {type === "particle" && <path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2" />}
       {type === "controller" && <><circle cx="8" cy="8" r="2.2" /><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4" /></>}
+      {type === "suit" && <path d="M5 2.5h6l2 3-2 1.2V13.5H5V6.7L3 5.5zM6.5 2.5c.4 1.2 2.6 1.2 3 0" />}
+      {type === "hud" && <><rect x="1.8" y="3" width="12.4" height="9" rx="1.2" /><path d="M4 10h3M10 5.5h2" /></>}
+      {type === "flight" && <path d="M8 2v6M5.5 8h5l-1.2 5.5h-2.6zM8 13.5v1" />}
+      {type === "guide" && <path d="M8 4c-1.8-1.2-3.8-1.4-5.5-1v9.5c1.7-.4 3.7-.2 5.5 1 1.8-1.2 3.8-1.4 5.5-1V3c-1.7-.4-3.7-.2-5.5 1zM8 4v9.5" />}
       {type === "data" && <path d="M5 3.5C3.5 4 3.5 5.5 3.5 7S3 8 2.5 8c.5 0 1 .5 1 1s0 3 1.5 3.5M11 3.5c1.5.5 1.5 2 1.5 3.5s.5 1 1 1c-.5 0-1 .5-1 1s0 3-1.5 3.5" />}
       {type === "other" && <path d="M3.5 1.5h5l4 4v8.5a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5zM8.5 1.5v4h4" />}
     </svg>

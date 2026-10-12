@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Speed search (IntelliJ-style type-to-find in trees) QA. Launches Atelier on a scratch project and drives the Project tree
+// Speed search (IntelliJ-style type-to-find in trees) QA. Launches Ace on a scratch project and drives the Project tree
 // ONLY through the automation harness (synthetic key events via __qa.key, no OS-level input). Screenshot: out/speedsearch.png
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/speedsearch.mjs
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/speedsearch.mjs
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launch, sleep } from "./lib.mjs";
 
-const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "atelier-ss-"));
+const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "ace-ss-"));
 const proj = path.join(scratch, "speedproj");
 fs.mkdirSync(path.join(proj, "src"), { recursive: true });
 for (const f of ["Main.kt", "MainView.kt", "README.md", "web_sling.animation.json", "WebSlingAnimation.java", "src/util.ts", "src/MainHelper.ts"]) fs.writeFileSync(path.join(proj, f), `// ${f}\n`);

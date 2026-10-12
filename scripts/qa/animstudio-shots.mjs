@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Screenshots of the Animation Studio timeline/layout (before/after UI polish). Read-only copies of the spidey clip + pose set and a gun geo
 // go into a temp fixture; nothing is written to Thematic repos.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/animstudio-shots.mjs <before|after>
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/animstudio-shots.mjs <before|after>
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

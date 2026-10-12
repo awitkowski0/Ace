@@ -1,4 +1,4 @@
-/** Parser for the subset of Ghostty's config / theme file format that Atelier honours (pure; unit-tested). */
+/** Parser for the subset of Ghostty's config / theme file format that Ace honours (pure; unit-tested). */
 import type { TermSettings } from "./settings";
 
 export type ConfigEntries = Array<[string, string]>;
@@ -37,7 +37,7 @@ export function colorOverridesFrom(entries: ConfigEntries): Record<string, strin
   return o;
 }
 
-/** Map a Ghostty config onto Atelier's terminal settings. Unknown keys are ignored. */
+/** Map a Ghostty config onto Ace's terminal settings. Unknown keys are ignored. */
 export function settingsFromGhostty(entries: ConfigEntries): Partial<TermSettings> {
   const s: Partial<TermSettings> = {};
   const fonts: string[] = [];

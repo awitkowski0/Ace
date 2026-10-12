@@ -50,8 +50,8 @@ export async function createCondaAndUse(o: { dir: string; pythonVersion?: string
 
 export const refreshInterpreters = () => ensurePython(true);
 
-// ---- terminal activation setting (localStorage atelier.python.terminalActivate, default on) ----
-const KEY = "atelier.python.terminalActivate";
+// ---- terminal activation setting (localStorage ace.python.terminalActivate, default on) ----
+const KEY = "ace.python.terminalActivate";
 const read = () => { try { return localStorage.getItem(KEY) !== "0"; } catch { return true; } };
 export const terminalActivateSetting = createStore<{ on: boolean }>({ on: read() });
 export const setTerminalActivate = (on: boolean) => {

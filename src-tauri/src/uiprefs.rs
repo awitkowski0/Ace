@@ -1,4 +1,4 @@
-//! Global UI preferences (colour scheme ...) in `<data dir>/ui-prefs.json` (honours ATELIER_DATA_DIR, so harness runs never
+//! Global UI preferences (colour scheme ...) in `<data dir>/ui-prefs.json` (honours ACE_DATA_DIR, so harness runs never
 //! touch the real file). Global like IntelliJ's look-and-feel: shared by every project window.
 use std::collections::BTreeMap;
 use std::path::PathBuf;

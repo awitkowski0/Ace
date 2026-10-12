@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Keystroke p95 on a .py file with basedpyright semantic tokens ON vs OFF (same build), plus idle RSS (app + WebKit helpers).
-// Usage: ATELIER_BIN=... node scripts/qa/themeperf.mjs
+// Usage: ACE_BIN=... node scripts/qa/themeperf.mjs
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

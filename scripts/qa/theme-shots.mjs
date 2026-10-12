@@ -2,7 +2,7 @@
 // One screenshot per scheme and file for Alex to compare: scripts/qa/out/themes/<scheme>-<file>.png (gd, tscn, java, json),
 // then the contact sheet (scripts/qa/contact-sheet.py -> out/themes/contact-sheet.png).
 // Opens REAL files strictly READ-ONLY (no typing, no save) through the automation harness; `git status` of both repos is compared before/after.
-// Usage: ATELIER_BIN=... node scripts/qa/theme-shots.mjs
+// Usage: ACE_BIN=... node scripts/qa/theme-shots.mjs
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

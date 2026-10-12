@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Every path in Atelier. `host` is "local" or an ssh alias (e.g. "mc").
+/// Every path in Ace. `host` is "local" or an ssh alias (e.g. "mc").
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Location {
     pub host: String,
@@ -14,7 +14,7 @@ impl Location {
 }
 
 /// First non-flag argument as a project location: `~/proj`, `./rel` (against `cwd`), `mc:/srv/app` (like `idea .`).
-/// Used for argv at startup and for the argv of a second `atelier <path>` process (single instance).
+/// Used for argv at startup and for the argv of a second `ace <path>` process (single instance).
 pub fn parse_args(args: &[String], cwd: Option<&std::path::Path>) -> Option<Location> {
     let arg = args.iter().find(|a| !a.starts_with('-'))?;
     if let Some((host, path)) = arg.split_once(':') {

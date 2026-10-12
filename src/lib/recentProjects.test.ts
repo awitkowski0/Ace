@@ -8,7 +8,7 @@ describe("transient paths", () => {
   it("flags temp/scratch folders (local only)", () => {
     for (const p of ["/private/var/folders/ab/xyz/T/atelier-qa-1/proj", "/var/folders/x/T/foo", "/tmp/foo", "/private/tmp/a", "/Users/a/p/.claude/worktrees/fix-1", "/Users/a/x/atelier-mp-123/proj-a", "/private/tmp/claude-501/-Users-a/scratchpad"])
       expect(isTransient(L(p)), p).toBe(true);
-    for (const p of ["/Users/a/IdeaProjects/Atelier", "/Users/a/tmpfiles/app", "/Users/a/thematic-kyf"]) expect(isTransient(L(p)), p).toBe(false);
+    for (const p of ["/Users/a/IdeaProjects/Ace", "/Users/a/tmpfiles/app", "/Users/a/thematic-kyf"]) expect(isTransient(L(p)), p).toBe(false);
     expect(isTransient(L("/tmp/x", "mc"))).toBe(false);
   });
   it("honours an explicit TMPDIR", () => {
@@ -35,15 +35,15 @@ describe("initials & colour", () => {
   it("makes IntelliJ-style tile text", () => {
     expect(initials("Thematic-Collections")).toBe("TC");
     expect(initials("HeirloomSite")).toBe("HS");
-    expect(initials("Atelier")).toBe("At");
+    expect(initials("Ace")).toBe("Ac");
     expect(initials("thematic-kyf")).toBe("TK");
     expect(initials("x")).toBe("X");
     expect(initials("my_cool_app")).toBe("MC");
     expect(initials("...")).toBe("..");
   });
   it("colour is stable and from the palette", () => {
-    const c = tileColor("local:/Users/a/Atelier");
-    expect(c).toBe(tileColor("local:/Users/a/Atelier"));
+    const c = tileColor("local:/Users/a/Ace");
+    expect(c).toBe(tileColor("local:/Users/a/Ace"));
     expect(TILE_COLORS).toContain(c);
     expect(new Set(["a", "b", "c", "d", "e", "f", "g"].map(tileColor)).size).toBeGreaterThan(2);
   });
@@ -56,7 +56,7 @@ describe("initials & colour", () => {
 
 describe("worktree grouping", () => {
   const D = "/Users/a/IdeaProjects";
-  const list = [L(`${D}/Thematic-Collections-spidey`), L(`${D}/thematic-kyf`), L(`${D}/Thematic-Collections`), L(`${D}/Thematic-Collections-guide-tablet`), L(`${D}/Atelier`), L("/home/a/app", "mc")];
+  const list = [L(`${D}/Thematic-Collections-spidey`), L(`${D}/thematic-kyf`), L(`${D}/Thematic-Collections`), L(`${D}/Thematic-Collections-guide-tablet`), L(`${D}/Ace`), L("/home/a/app", "mc")];
   it("parses worktree .git files", () => {
     expect(mainRepoFromGitFile("gitdir: /Users/a/IdeaProjects/Thematic-Collections/.git/worktrees/spidey\n")).toBe(`${D}/Thematic-Collections`);
     expect(mainRepoFromGitFile("gitdir: ../.git/modules/x")).toBeNull();
@@ -81,7 +81,7 @@ describe("worktree grouping", () => {
     expect(g.some(isGroup)).toBe(false);
   });
   it("a declared standalone repo is never grouped by name", () => {
-    const a = L(`${D}/Atelier`), b = L(`${D}/Atelier-docs`);
+    const a = L(`${D}/Ace`), b = L(`${D}/Ace-docs`);
     expect(groupWorktrees([a, b], { [recentKey(b)]: null }).some(isGroup)).toBe(false);
   });
 });

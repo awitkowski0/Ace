@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Idle memory with the Gradle window open vs closed (cached scratch project, nothing spawned). Usage: node scripts/qa/gradleperf.mjs  Env: ATELIER_BIN
+// Idle memory with the Gradle window open vs closed (cached scratch project, nothing spawned). Usage: node scripts/qa/gradleperf.mjs  Env: ACE_BIN
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

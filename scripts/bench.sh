@@ -4,7 +4,7 @@
 # Env: PROJ, RUNS (cold-start repetitions, default 5), BENCH_TMP.  Needs node + a Screen-Recording-free harness only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export BENCH_TMP="${BENCH_TMP:-${TMPDIR:-/tmp}/atelier-bench}"; mkdir -p "$BENCH_TMP"
+export BENCH_TMP="${BENCH_TMP:-${TMPDIR:-/tmp}/ace-bench}"; mkdir -p "$BENCH_TMP"
 if [ -z "${SKIP_BUILD:-}" ]; then
   # --no-bundle: binary only. Fallback (e.g. tsc errors in someone's WIP): vite build + cargo with the same custom-protocol feature tauri-cli adds.
   pnpm tauri build --no-bundle || { pnpm vite build && (cd src-tauri && cargo build --release --features tauri/custom-protocol); }

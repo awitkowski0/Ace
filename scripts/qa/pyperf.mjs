@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Idle memory with a Python project open vs a plain project (docs/PYTHON.md). Usage: ATELIER_BIN=... node scripts/qa/pyperf.mjs
+// Idle memory with a Python project open vs a plain project (docs/PYTHON.md). Usage: ACE_BIN=... node scripts/qa/pyperf.mjs
 import { execSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Colour scheme suite (src/theme, docs/THEMES.md). Launches Ace under the automation harness on a SCRATCH project (own basedpyright venv,
 // created with uv) and drives it only through window.__qa / __qa.themes(): no OS keyboard/mouse. Persistence is checked by relaunching
-// with the same ATELIER_DATA_DIR. Real-file screenshots live in theme-shots.mjs.
-// Usage: node scripts/qa/themes.mjs [--only <substring>]     Env: ATELIER_BIN
+// with the same ACE_DATA_DIR. Real-file screenshots live in theme-shots.mjs.
+// Usage: node scripts/qa/themes.mjs [--only <substring>]     Env: ACE_BIN
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -160,7 +160,7 @@ try {
     const st = await T("return { st: T.state(), bg: T.cssVar('--bg-editor') }");
     return { ok: st.st.saved === "tokyo-night" && st.bg === "#1a1b26", note: `saved=${st.st.saved} bg=${st.bg}` };
   });
-  await check("persistence file lives in ATELIER_DATA_DIR only", async () => {
+  await check("persistence file lives in ACE_DATA_DIR only", async () => {
     const f = path.join(dataDir, "ui-prefs.json");
     return { ok: fs.existsSync(f) && /tokyo-night/.test(fs.readFileSync(f, "utf8")) };
   });

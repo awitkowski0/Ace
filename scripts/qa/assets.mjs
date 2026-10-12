@@ -2,7 +2,7 @@
 // File-editor (viewer) suite: images, mcmeta animation, markdown, audio, glTF, Blockbench, CSV, NBT, fonts, archives, video,
 // binary/too-large placeholders, syntax, splits/⌘W/Recent Files, external reload, remote (mc) image + md, and read-only opens of
 // real repo files with screenshots. Driven only through the automation harness (no OS-level input).
-// Usage: node scripts/qa/assets.mjs [--keep] [--no-real] [--no-remote]    Env: ATELIER_BIN
+// Usage: node scripts/qa/assets.mjs [--keep] [--no-real] [--no-remote]    Env: ACE_BIN
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

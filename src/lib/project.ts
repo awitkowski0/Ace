@@ -5,8 +5,8 @@ import { homeShorten } from "./paths";
 import { windows } from "./windows";
 import { recentKey as normalizeRecentKey } from "./recentProjects";
 
-const RECENT_KEY = "atelier.recent";
-const OPEN_IN_KEY = "atelier.openIn";
+const RECENT_KEY = "ace.recent";
+const OPEN_IN_KEY = "ace.openIn";
 const MAX_RECENT = 25; // the Welcome screen declutters (temp/missing/duplicate/worktrees), so keep more than the old 10
 
 function readRecent(): Location[] {

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Godot suite (docs/GODOT.md). Drives Ace only through the ATELIER_AUTOMATION harness (never the real keyboard/mouse) on a SCRATCH Godot
+// Godot suite (docs/GODOT.md). Drives Ace only through the ACE_AUTOMATION harness (never the real keyboard/mouse) on a SCRATCH Godot
 // project under TMPDIR (scripts/qa/godot-fixture.mjs). Every game runs headless: no window ever opens. Opening the real Godot editor is
-// intercepted (ATELIER_GODOT_LAUNCH_LOG): the argv is logged instead of launched.
-// Usage: node scripts/qa/godot.mjs [--only <substring>] [--thematic]      Env: ATELIER_BIN
+// intercepted (ACE_GODOT_LAUNCH_LOG): the argv is logged instead of launched.
+// Usage: node scripts/qa/godot.mjs [--only <substring>] [--thematic]      Env: ACE_BIN
 //   --thematic: ONLY a read-only acceptance on ~/thematic-kyf (presets / scripts / main scene, one short headless arch_check.gd run) and exit.
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -37,7 +37,7 @@ if (args.includes("--thematic")) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "ace-godot-them-"));
   const app = await launch(real, { dataDir });
   try {
-    await app.ev(`await __qa.waitFor(() => document.querySelector('.statusbar'), 15000); localStorage.setItem("atelier.lsp.autoGodot", "0"); return 1`);
+    await app.ev(`await __qa.waitFor(() => document.querySelector('.statusbar'), 15000); localStorage.setItem("ace.lsp.autoGodot", "0"); return 1`);
     const st = await app.ev(`const g = await __qa.godot(); return await g.scan()`);
     console.log("name:", st.name, "| main scene:", st.mainScene, "| scenes:", st.scenes.length, "| bin:", st.bin);
     console.log("presets:", st.presets.length); for (const p of st.presets) console.log("  -", p.name, "|", p.type, p.headless ? "headless" : "", p.timeLimit ? p.timeLimit + "s" : "", p.instanceArgs ? "instances " + p.instanceArgs.join(" / ") : "");
@@ -67,7 +67,7 @@ const proj = makeProject(path.join(scratch, "proj"), { port: 47000 + (process.pi
 const P = (...p) => path.join(proj, ...p);
 const launchLog = path.join(scratch, "launch.log");
 const godotBefore = godotProcs("ace-godot-");
-const app = await launch(proj, { env: { ATELIER_GODOT_LAUNCH_LOG: launchLog } });
+const app = await launch(proj, { env: { ACE_GODOT_LAUNCH_LOG: launchLog } });
 const G = (body, o) => app.ev(`const g = await __qa.godot(); const py = await __qa.py(); const d = py.debug; const run = py.run; ${body}`, o);
 const until = async (expr, ms = 20000, label = expr) => {
   const t0 = Date.now();
@@ -85,7 +85,7 @@ const spec = (o) => ({ headless: true, liveReload: false, ...o });
 const scrubBefore = () => G(`for (const s of [...g.sessions()]) { try { await run.close(s.id); } catch {} } await d.closeAll(); d.bps.clear(); return 1`, { timeout: 20000 });
 
 try {
-  await app.ev(`await __qa.waitFor(() => document.querySelector('.statusbar'), 15000); localStorage.setItem("atelier.lsp.autoGodot", "0"); return 1`);
+  await app.ev(`await __qa.waitFor(() => document.querySelector('.statusbar'), 15000); localStorage.setItem("ace.lsp.autoGodot", "0"); return 1`);
   await sleepMs(500);
 
   // ------------------------------------------------------------ detection, types, discovery

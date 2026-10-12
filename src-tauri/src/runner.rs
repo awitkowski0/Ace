@@ -438,7 +438,7 @@ pub fn release_window(label: &str) {
     runs().lock().unwrap().retain(|_, r| r.owner != label);
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // drives /bin/sh children
 mod tests {
     use super::*;
 

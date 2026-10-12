@@ -169,7 +169,7 @@ export async function openFile(loc: Location, arg?: string | OpenOptions) {
 async function loadDoc(loc: Location, key: string, forceText = false) {
   const name = basename(loc.path);
   try {
-    let d = decide(name);
+    let d = decide(name, loc.path);
     if (forceText && (d.viewer === "binary" || d.viewer === "toolarge")) d = { needsProbe: false };
     let size: number | undefined;
     if (!d.viewer) {

@@ -863,7 +863,7 @@ pub async fn git_worktree_prune(root: Location) -> Result<(), String> {
     blocking(move || run(&root, &["worktree", "prune"]).map(|_| ())).await
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // fixtures are built with sh -c
 mod tests {
     use super::*;
     fn sh(d: &str, c: &str) {
@@ -871,7 +871,7 @@ mod tests {
     }
     #[test]
     fn scratch_repo_flow() {
-        let d = std::env::var("ATELIER_GIT_TEST_DIR").unwrap_or_else(|_| "/tmp/atelier-git-test".into());
+        let d = crate::appenv::var("ACE_GIT_TEST_DIR").unwrap_or_else(|_| "/tmp/ace-git-test".into());
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(format!("{d}/src/a")).unwrap();
         sh(&d, "git init -q -b main && git config user.email t@t && git config user.name T");
@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn worktree_commands() {
-        let d = std::env::var("ATELIER_GIT_WT_TEST_DIR").unwrap_or_else(|_| format!("{}/atelier-wt-test", std::env::temp_dir().display()));
+        let d = crate::appenv::var("ACE_GIT_WT_TEST_DIR").unwrap_or_else(|_| format!("{}/ace-wt-test", std::env::temp_dir().display()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(format!("{d}/main")).unwrap();
         let m = format!("{d}/main");

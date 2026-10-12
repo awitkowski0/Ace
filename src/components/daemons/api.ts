@@ -1,6 +1,6 @@
 import { invoke, listen } from "../../lib/ipc";
 
-export type Kind = "gradle" | "kotlin" | "java" | "lsp" | "claude" | "atelier" | "minecraft";
+export type Kind = "gradle" | "kotlin" | "java" | "lsp" | "claude" | "ace" | "minecraft";
 export interface ProcRow {
   host: string;
   pid: number;
@@ -12,7 +12,7 @@ export interface ProcRow {
   uptimeSecs: number;
   cwd: string | null;
   busy: boolean | null;
-  atelier: boolean;
+  ace: boolean;
   cmd: string;
   /** Minecraft servers: excluded from bulk actions; killing requires typing the PID */
   guarded: boolean;
@@ -73,7 +73,7 @@ export function fmtUptime(s: number): string {
 }
 
 /** Extra directories scanned for gradle-wrapper references (setting, per host). Empty = default ($HOME + /opt/mc when it exists). */
-const ROOTS_KEY = (host: string) => `atelier.daemons.extraRoots.${host}`;
+const ROOTS_KEY = (host: string) => `ace.daemons.extraRoots.${host}`;
 export function getExtraRoots(host: string): string[] {
   try {
     const v = JSON.parse(localStorage.getItem(ROOTS_KEY(host)) ?? "[]");

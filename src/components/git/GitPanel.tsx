@@ -161,9 +161,9 @@ function ConsoleTab() {
 }
 
 export function GitPanel(_: ToolWindowProps) {
-  const [tab, setTab] = useState<"log" | "console">(() => (localStorage.getItem("atelier.git.tab") as "log" | "console") || "log");
+  const [tab, setTab] = useState<"log" | "console">(() => (localStorage.getItem("ace.git.tab") as "log" | "console") || "log");
   const { job } = useStore(gitStore);
-  const set = (t: "log" | "console") => { setTab(t); try { localStorage.setItem("atelier.git.tab", t); } catch {} };
+  const set = (t: "log" | "console") => { setTab(t); try { localStorage.setItem("ace.git.tab", t); } catch {} };
   // surface the console when a network op starts
   useEffect(() => { if (job !== null) setTab("console"); }, [job]);
   return (

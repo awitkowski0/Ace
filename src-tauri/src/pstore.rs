@@ -5,10 +5,10 @@ use crate::Location;
 use std::path::PathBuf;
 
 pub fn data_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("ATELIER_DATA_DIR") {
+    if let Some(d) = crate::appenv::var_os("ACE_DATA_DIR") {
         return d.into();
     }
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("com.alexw.atelier")
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("com.alexw.ace")
 }
 
 fn project_dir(root: &Location) -> PathBuf {

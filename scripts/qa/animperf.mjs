@@ -2,7 +2,7 @@
 // Animation Studio playback benchmark (docs/ANIMSTUDIO.md). READ-ONLY on the real Thematic-Collections web_sling clip + spiderman geo.
 // The hidden QA webview never fires rAF, so __qa.anim().perf.bench() drives N synthetic frames through the same code the rAF loop
 // runs (playback stepOnce -> store.set -> React + engine sync flush -> three render -> timeline canvases) and times every stage.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/animperf.mjs   (FRAMES=240, OUT=path.json)
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/animperf.mjs   (FRAMES=240, OUT=path.json)
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

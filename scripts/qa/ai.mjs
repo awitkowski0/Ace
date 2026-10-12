@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // AI sessions suite: Files <-> AI flip, Claude "done / needs input" notifications (hook channel local + mc, transcript fallback).
 // Drives Ace ONLY through the automation harness (window.__qa, __qa.ai(), __qa.term()): no OS-level keyboard/mouse.
-// NEVER starts a real Claude session: ATELIER_CLAUDE_BIN / ATELIER_CLAUDE_BIN_MC point Ace's `claude` launches at
+// NEVER starts a real Claude session: ACE_CLAUDE_BIN / ACE_CLAUDE_BIN_MC point Ace's `claude` launches at
 // scripts/qa/ai/fake-claude.py (accepts --settings, runs the configured hooks with realistic JSON payloads), transcripts live in a
-// scratch ATELIER_CLAUDE_PROJECTS. Desktop notifications are intercepted by the notify test hook (no OS notification pops up).
+// scratch ACE_CLAUDE_PROJECTS. Desktop notifications are intercepted by the notify test hook (no OS notification pops up).
 // The mc part runs only when `ssh mc` works and only touches /tmp/ace-ai-fake-<nonce> (removed afterwards).
-// Usage: node scripts/qa/ai.mjs [--no-ssh] [--only <substr>]    Env: ATELIER_BIN
+// Usage: node scripts/qa/ai.mjs [--no-ssh] [--only <substr>]    Env: ACE_BIN
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -46,10 +46,10 @@ if (!noSsh) {
 
 const app = await launch(proj, {
   env: {
-    ATELIER_CLAUDE_BIN: fake,
-    ATELIER_CLAUDE_PROJECTS: projects,
-    ATELIER_FAKE_ARGS: argsLog,
-    ...(mcDir ? { ATELIER_CLAUDE_BIN_MC: `${mcDir}/claude` } : {}),
+    ACE_CLAUDE_BIN: fake,
+    ACE_CLAUDE_PROJECTS: projects,
+    ACE_FAKE_ARGS: argsLog,
+    ...(mcDir ? { ACE_CLAUDE_BIN_MC: `${mcDir}/claude` } : {}),
   },
 });
 const rows = [];
@@ -441,7 +441,7 @@ if (mcDir) {
     let up = false, last = null;
     for (let i = 0; i < 40 && !up; i++) { await sleep(1000); last = await A(`const p = T.pane(${J(id)}); return { shell: p.cwdFromShell, text: T.text(${J(id)}).trim().slice(-300), exited: p.exited }`); up = last.shell; }
     if (!up) throw new Error("remote shell never came up: " + J(last));
-    await A(`T.sendText(${J(id)}, 'echo HF=$(case "$ATELIER_HOOK_FILE" in /tmp/ace-claude-hooks-*) echo ok;; esac) PANE=$ATELIER_PANE SET=$(printf %s "$ATELIER_CLAUDE_SETTINGS" | head -c 9); type claude | head -1\\n'); return 1`, { timeout: 5000 });
+    await A(`T.sendText(${J(id)}, 'echo HF=$(case "$ACE_HOOK_FILE" in /tmp/ace-claude-hooks-*) echo ok;; esac) PANE=$ACE_PANE SET=$(printf %s "$ACE_CLAUDE_SETTINGS" | head -c 9); type claude | head -1\\n'); return 1`, { timeout: 5000 });
     for (let i = 0; i < 20; i++) { await sleep(500); if (await A(`return /claude is a function/.test(text(${J(id)}))`, { timeout: 5000 })) break; }
     const txt = await A(`return text(${J(id)})`);
     const files = ssh("ls /tmp/ace-claude-hooks-*.log 2>/dev/null | wc -l").trim();

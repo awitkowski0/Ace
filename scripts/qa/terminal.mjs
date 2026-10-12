@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Terminal (Ghostty parity) suite. Launches Atelier on a scratch project and drives it ONLY through the automation harness
+// Terminal (Ghostty parity) suite. Launches Ace on a scratch project and drives it ONLY through the automation harness
 // (window.__qa + __qa.term()): no OS-level keyboard/mouse input. The harness uses a private NSPasteboard, so Alex's clipboard is untouched,
 // and desktop notifications / browser opens are intercepted by test hooks.
-// Usage: node scripts/qa/terminal.mjs [--no-ssh]    Env: ATELIER_BIN
+// Usage: node scripts/qa/terminal.mjs [--no-ssh]    Env: ACE_BIN
 import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launch, sleep } from "./lib.mjs";
 
-const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "atelier-term-"));
+const scratch = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "ace-term-"));
 const proj = fs.realpathSync(scratch) + "/proj";
 fs.mkdirSync(path.join(proj, "src"), { recursive: true });
 fs.mkdirSync(path.join(proj, "scripts"), { recursive: true });
@@ -59,12 +59,12 @@ await check("zsh/bash shell integration: OSC 7 cwd + OSC 133 prompt marks arrive
   return { ok: cwd === proj && p.blocks >= 1, note: `cwd=${cwd} blocks=${p.blocks}` };
 });
 await check("shell integration never touches dotfiles (ZDOTDIR is private, user's restored)", async () => {
-  await run('print -r -- "ZD=[${ZDOTDIR:-unset}] INT=[$ATELIER_SHELL_INTEGRATION]" 2>/dev/null || echo ZD=[$ZDOTDIR]');
+  await run('print -r -- "ZD=[${ZDOTDIR:-unset}] INT=[$ACE_SHELL_INTEGRATION]" 2>/dev/null || echo ZD=[$ZDOTDIR]');
   await sleep(700);
   const txt = await T("return T.text(cur().id)");
   const m = /ZD=\[([^\]]*)\]/.exec(txt.split("\n").filter((l) => l.startsWith("ZD=")).pop() ?? "");
   const zd = m?.[1];
-  return { ok: !!zd && !zd.includes("atelier-shell-integration"), note: `ZDOTDIR in shell=${zd}` };
+  return { ok: !!zd && !zd.includes("ace-shell-integration"), note: `ZDOTDIR in shell=${zd}` };
 });
 
 // ------------------------------------------------------------------------------------------------ cwd inheritance, splits

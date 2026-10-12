@@ -8,7 +8,7 @@ const files = import.meta.glob("../keymap/intellij-macos.json", { eager: true, i
 >;
 const keymap: Record<string, string[]> = Object.values(files)[0] ?? {};
 
-const OVERRIDE_KEY = "atelier.keymap.overrides";
+const OVERRIDE_KEY = "ace.keymap.overrides";
 function overrides(): Record<string, string[]> {
   try {
     return JSON.parse(localStorage.getItem(OVERRIDE_KEY) ?? "{}");

@@ -8,15 +8,15 @@ startup by `src/editor/monacoKeymap.ts`.
 |---|---|---|
 | keep-same | 52 | same meaning in IntelliJ - Monaco keeps the key |
 | keep-widget | 201 | only active while a Monaco widget (suggest, find input, snippet, hover, rename input, ...) needs it |
-| remove-routed | 30 | key is bound to a different IntelliJ action that Atelier implements; Monaco binding removed, Atelier action runs |
-| remove-swallow | 44 | key is bound to an IntelliJ action Atelier does not implement; Monaco binding removed and key swallowed in the editor |
+| remove-routed | 30 | key is bound to a different IntelliJ action that Ace implements; Monaco binding removed, Ace action runs |
+| remove-swallow | 44 | key is bound to an IntelliJ action Ace does not implement; Monaco binding removed and key swallowed in the editor |
 | remove-unbound | 54 | Monaco-only binding, IntelliJ binds nothing there; removed |
 
 Total Monaco default bindings audited: 381
 
 ## Kept (same meaning / widget keys)
 
-| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Atelier |
+| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Ace |
 |---|---|---|---|---|---|
 | `alt BACK_SPACE` | `deleteWordLeft` | `textInputFocus && !editorReadonly` | EditorDeleteToWordStart | keep-same | Monaco |
 | `alt CLOSE_BRACKET` | `editor.action.inlineSuggest.showNext` | `inlineSuggestionVisible && !editorReadonly` | NextInlineCompletionSuggestionAction | keep-widget | Monaco |
@@ -272,9 +272,9 @@ Total Monaco default bindings audited: 381
 | `UP` | `selectPrevSuggestion` | `suggestWidgetMultipleSuggestions && suggestWidgetVisible && textInputFocus \|\| suggestWidgetVisible && textInputFocus && !suggestWidgetHasFocusedSuggestion` | EditorUp, JupyterSelectCellAboveCommandModeAction, Terminal.SelectBlockAbove | keep-widget | Monaco |
 | `UP` | `showPrevParameterHint` | `editorFocus && parameterHintsMultipleSignatures && parameterHintsVisible` | EditorUp, JupyterSelectCellAboveCommandModeAction, Terminal.SelectBlockAbove | keep-widget | Monaco |
 
-## Removed and routed to an Atelier action
+## Removed and routed to an Ace action
 
-| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Atelier |
+| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Ace |
 |---|---|---|---|---|---|
 | `alt DOWN` | `editor.action.moveLinesDownAction` | `editorTextFocus && !editorReadonly` | Arrangement.Rule.Match.Condition.Move.Down, EditorUnSelectWord, JupyterNotebookMoveCellDownCommandModeAction, List-selectLastRow, MethodOverloadSwitchDown, ShowSearchHistory | remove-routed | EditorUnSelectWord |
 | `alt meta L` | `toggleFindInSelection` | `editorFocus` | ReformatCode | remove-routed | ReformatCode |
@@ -309,7 +309,7 @@ Total Monaco default bindings audited: 381
 
 ## Removed and swallowed (IntelliJ-bound, not implemented)
 
-| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Atelier |
+| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Ace |
 |---|---|---|---|---|---|
 | `alt F8` | `editor.action.marker.next` | `editorFocus` | EvaluateExpression | remove-swallow | swallowed (no-op) |
 | `alt meta C` | `toggleFindCaseSensitive` | `editorFocus` | IntroduceConstant | remove-swallow | swallowed (no-op) |
@@ -358,7 +358,7 @@ Total Monaco default bindings audited: 381
 
 ## Removed (no IntelliJ binding)
 
-| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Atelier |
+| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Ace |
 |---|---|---|---|---|---|
 | `alt meta BACK_SPACE` | `editor.action.removeBrackets` | `editorTextFocus` | - | remove-unbound | removed |
 | `alt shift F` | `editor.action.formatDocument` | `editorHasDocumentFormattingProvider && editorTextFocus && !editorReadonly && !inCompositeEditor` | - | remove-unbound | removed |

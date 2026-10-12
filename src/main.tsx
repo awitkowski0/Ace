@@ -1,3 +1,4 @@
+import "./lib/migrateStorage"; // must stay first: copies atelier.* localStorage keys to ace.* before any store reads them
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "@fontsource/inter/latin-400.css";
@@ -16,7 +17,7 @@ import { initScheme } from "./theme";
 
 installDispatcher();
 installWindowLifecycle(); // close-requested prompt + native File menu actions
-void maybeInstallQa(); // no-op unless ATELIER_AUTOMATION=1 (see src/qa)
+void maybeInstallQa(); // no-op unless ACE_AUTOMATION=1 (see src/qa)
 void initScheme().finally(() => // colour scheme (global preference) is applied before the first paint
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>

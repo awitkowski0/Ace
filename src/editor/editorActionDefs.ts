@@ -1,4 +1,4 @@
-/** Data only: IntelliJ editor actions Atelier implements on top of Monaco commands (keys come from the keymap JSON). */
+/** Data only: IntelliJ editor actions Ace implements on top of Monaco commands (keys come from the keymap JSON). */
 export interface EditorActionDef {
   id: string; // IntelliJ action id
   title: string;

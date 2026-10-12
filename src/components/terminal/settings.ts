@@ -1,10 +1,10 @@
-/** Terminal settings. Layers: defaults < Ghostty config (read-only, if one exists) < Atelier's own choices (localStorage). */
+/** Terminal settings. Layers: defaults < Ghostty config (read-only, if one exists) < Ace's own choices (localStorage). */
 import { createStore } from "../../lib/store";
 import { invoke } from "../../lib/ipc";
 import { parseConfigText, settingsFromGhostty } from "./ghosttyConfig";
 
 export interface TermSettings {
-  /** Ghostty theme name, or `light:Name,dark:Name`. "Nord (Atelier)" = the IDE's own palette. */
+  /** Ghostty theme name, or `light:Name,dark:Name`. "Nord (Ace)" = the IDE's own palette. */
   theme: string;
   fontFamily: string;
   fontSize: number;
@@ -30,7 +30,7 @@ export interface TermSettings {
   colorOverrides: Record<string, string>;
 }
 
-export const DEFAULT_THEME = "Nord (Atelier)";
+export const DEFAULT_THEME = "Nord (Ace)";
 export const DEFAULTS: TermSettings = {
   theme: DEFAULT_THEME,
   fontFamily: '"JetBrains Mono", Menlo, monospace',
@@ -56,10 +56,12 @@ export const DEFAULTS: TermSettings = {
   colorOverrides: {},
 };
 
-const KEY = "atelier.terminal.settings";
+const KEY = "ace.terminal.settings";
 function loadStored(): Partial<TermSettings> {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const o = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<TermSettings>;
+    if (typeof o.theme === "string") o.theme = o.theme.replace(/\(Atelier\)/g, "(Ace)"); // the built-in theme was renamed "Nord (Atelier)" -> "Nord (Ace)"
+    return o;
   } catch {
     return {};
   }
@@ -71,7 +73,7 @@ const merge = (): TermSettings => ({ ...DEFAULTS, ...ghostty, ...stored });
 export const settingsStore = createStore<{ s: TermSettings }>({ s: merge() });
 export const getSettings = () => settingsStore.get().s;
 
-/** Change settings (persisted as Atelier's own choices, winning over the Ghostty config). */
+/** Change settings (persisted as Ace's own choices, winning over the Ghostty config). */
 export function updateSettings(patch: Partial<TermSettings>) {
   stored = { ...stored, ...patch };
   try { localStorage.setItem(KEY, JSON.stringify(stored)); } catch {}

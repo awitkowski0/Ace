@@ -1,4 +1,4 @@
-# Atelier — spec (v1)
+# Ace — spec (v1)
 
 A Tauri 2 desktop IDE for macOS that feels like IntelliJ IDEA for Alex's projects
 (Thematic = Godot/GDScript at ~/thematic-kyf, plus Rust/TS/Python/Java side projects),
@@ -47,7 +47,7 @@ The editor, file tree, search, terminal and Claude panel all take a Location so 
 9. Keymap = IntelliJ "Mac OS X 10.5+" plus Alex's overrides from
    ~/Library/Application Support/JetBrains/IntelliJIdea2025.1/keymaps/macOS copy.xml
    (RenameElement: shift F6 and `p`; only the first is applied in-editor, `p` only when editor not focused).
-   Keymap is data: `src/keymap/intellij-macos.json` (actionId -> shortcuts), mapped to Atelier
+   Keymap is data: `src/keymap/intellij-macos.json` (actionId -> shortcuts), mapped to Ace
    actions via a registry. Unmapped IntelliJ actions are ignored. Settings UI can rebind.
 10. Tool window layout like IntelliJ: left (Project ⌘1 with its second view AI Sessions ⌃⌥C, Remote Files), bottom (Terminal, Find, Git,
     Problems ⌘6), stripes with toggles, resizable, state persisted per project.
@@ -81,10 +81,10 @@ Alex wants it to *feel* exactly like IntelliJ IDEA 2026.1 New UI. Every agent mu
 
 ## Efficiency budgets (validated before "done")
 Measured on Alex's Mac against ~/thematic-kyf, with `scripts/bench.sh` producing `docs/PERF.md`:
-- Cold start to interactive editor < 1.0s; idle RSS of Atelier + its WebKit helpers < 500MB with 10 tabs open; idle CPU
+- Cold start to interactive editor < 1.0s; idle RSS of Ace + its WebKit helpers < 500MB with 10 tabs open; idle CPU
   < 0.3% (app + WebKit) while the window is unfocused.
   Amended after the final perf pass (docs/PERF.md): (a) the original 250MB "all processes" figure is below WKWebView's own
-  floor (a bare window is ~355MB: ~245MB WebKit + ~110MB app; the first Monaco editor adds ~50MB), and external tools Atelier
+  floor (a bare window is ~355MB: ~245MB WebKit + ~110MB app; the first Monaco editor adds ~50MB), and external tools Ace
   launches (headless Godot ~2GB on Thematic, rust-analyzer, gradle, ...) are excluded the way IntelliJ's JVM children are not
   counted against the IDE: they are suspended when idle (Godot: SIGSTOP after 20s without LSP traffic or a focused .gd editor)
   and reaped after 5 minutes without a session. (b) A focused editable element in WKWebView on macOS 26 costs ~2-7% of a core
@@ -98,7 +98,7 @@ Measured on Alex's Mac against ~/thematic-kyf, with `scripts/bench.sh` producing
 ## Processes & Daemons tool window (⌘⇧D)
 Local + `mc` (over ssh), refreshed on open and every 5s only while visible:
 - Gradle daemons (`org.gradle.launcher.daemon.bootstrap.GradleDaemon`), Kotlin compile daemons, other JVMs,
-  language servers, Claude CLI processes, Atelier's own children. Columns: PID, kind, version, RSS, CPU, uptime,
+  language servers, Claude CLI processes, Ace's own children. Columns: PID, kind, version, RSS, CPU, uptime,
   idle/busy, project dir (from cwd via `lsof -a -d cwd -p` / `/proc/<pid>/cwd`).
 - Actions: Stop (graceful: `gradle --stop` with the matching wrapper version, else SIGTERM → SIGKILL after 5s),
   Stop all idle, Kill selected, Stop all Gradle on host.

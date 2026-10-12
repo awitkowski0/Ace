@@ -51,7 +51,7 @@ export const abbrevPath = (l: Loc, home?: string): string => {
 
 const base = (p: string) => basename(p) || p;
 
-/** Two-letter tile text like IntelliJ: initials of words/camelCase humps ("Thematic-Collections" -> "TC", "HeirloomSite" -> "HS"), single word -> first 2 letters ("Atelier" -> "At"). */
+/** Two-letter tile text like IntelliJ: initials of words/camelCase humps ("Thematic-Collections" -> "TC", "HeirloomSite" -> "HS"), single word -> first 2 letters ("Ace" -> "Ac"). */
 export function initials(name: string): string {
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
   if (!words.length) return (name.trim().slice(0, 2) || "?").toUpperCase();

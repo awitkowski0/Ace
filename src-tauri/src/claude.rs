@@ -60,10 +60,10 @@ type Cache = Mutex<CacheState>;
 
 fn cache_file() -> Option<std::path::PathBuf> {
     // A test override of the projects dir must never overwrite the real session snapshot.
-    if std::env::var_os("ATELIER_CLAUDE_PROJECTS").is_some() {
+    if crate::appenv::var_os("ACE_CLAUDE_PROJECTS").is_some() {
         return None;
     }
-    dirs::cache_dir().map(|c| c.join("atelier").join(format!("claude-sessions.v{CACHE_VERSION}.json")))
+    dirs::cache_dir().map(|c| c.join("ace").join(format!("claude-sessions.v{CACHE_VERSION}.json")))
 }
 
 fn load_disk() -> DiskCache {
@@ -196,9 +196,9 @@ fn parse_file(path: &Path, id: &str, mtime: u64, size: u64) -> SessionInfo {
     info
 }
 
-/// `~/.claude/projects`; `ATELIER_CLAUDE_PROJECTS` overrides it (automation tests with synthetic transcripts).
+/// `~/.claude/projects`; `ACE_CLAUDE_PROJECTS` overrides it (automation tests with synthetic transcripts).
 pub(crate) fn projects_dir() -> Option<std::path::PathBuf> {
-    if let Some(p) = std::env::var_os("ATELIER_CLAUDE_PROJECTS") {
+    if let Some(p) = crate::appenv::var_os("ACE_CLAUDE_PROJECTS") {
         return Some(p.into());
     }
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))

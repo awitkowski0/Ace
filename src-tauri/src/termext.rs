@@ -56,14 +56,14 @@ fn pasteboard() -> objc2::rc::Retained<objc2_app_kit::NSPasteboard> {
     use objc2_app_kit::NSPasteboard;
     use objc2_foundation::NSString;
     // The automation harness uses a private pasteboard so tests never touch the real clipboard.
-    if std::env::var_os("ATELIER_AUTOMATION").is_some() {
-        NSPasteboard::pasteboardWithName(&NSString::from_str("atelier-qa"))
+    if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
+        NSPasteboard::pasteboardWithName(&NSString::from_str("ace-qa"))
     } else {
         NSPasteboard::generalPasteboard()
     }
 }
 
-/// Windows clipboard under ATELIER_AUTOMATION: a process-private slot, so QA never touches the real clipboard.
+/// Windows clipboard under ACE_AUTOMATION: a process-private slot, so QA never touches the real clipboard.
 #[cfg(windows)]
 static QA_TEXT: parking_lot::Mutex<String> = parking_lot::Mutex::new(String::new());
 
@@ -82,7 +82,7 @@ pub fn clipboard_write(text: String) -> Result<(), String> {
     }
     #[cfg(windows)]
     {
-        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+        if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
             *QA_TEXT.lock() = text;
             return Ok(());
         }
@@ -105,7 +105,7 @@ pub fn clipboard_read() -> String {
     }
     #[cfg(windows)]
     {
-        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+        if crate::appenv::var_os("ACE_AUTOMATION").is_some() {
             return QA_TEXT.lock().clone();
         }
         // Empty when the clipboard holds no text (an image, or files): Get-Clipboard -Raw returns nothing then.

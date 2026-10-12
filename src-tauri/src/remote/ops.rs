@@ -123,7 +123,7 @@ pub fn read_file(host: &str, path: &str) -> FsResult<String> {
 pub fn write_file(host: &str, path: &str, contents: &str) -> FsResult<()> {
     // Resolve symlinks, keep mode, write to a sibling temp file then rename over the target.
     let script = format!(
-        "p=$(readlink -f -- {p} 2>/dev/null || printf %s {p}); t=\"$p.atelier-tmp.$$\"; \
+        "p=$(readlink -f -- {p} 2>/dev/null || printf %s {p}); t=\"$p.ace-tmp.$$\"; \
          if cat > \"$t\"; then m=$(stat -c %a -- \"$p\" 2>/dev/null); [ -n \"$m\" ] && chmod \"$m\" \"$t\"; mv -f -- \"$t\" \"$p\"; \
          else rm -f -- \"$t\"; exit 1; fi",
         p = qp(path)
@@ -240,7 +240,7 @@ mod tests {
         let t = Instant::now();
         list_rich(h, &home).unwrap();
         println!("list_dir warm {:?}", t.elapsed());
-        let d = "/tmp/atelier-test-unit";
+        let d = "/tmp/ace-test-unit";
         create_dir(h, d).unwrap();
         let f = format!("{d}/a b'c.txt");
         let t = Instant::now();

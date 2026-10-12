@@ -31,7 +31,7 @@ const LEAKY = new Set(["meta R", "meta shift R", "F5", "control R", "meta EQUALS
 
 const modOf = (e: KeyboardEvent): Mod | null => {
   const n = modifierName(e.code) ?? ({ Shift: "shift", Control: "control", Alt: "alt", Meta: "meta" } as Record<string, string>)[e.key];
-  // Windows: the Control key is the command key (double-Ctrl = "double meta"); the Win key is not an Atelier modifier.
+  // Windows: the Control key is the command key (double-Ctrl = "double meta"); the Win key is not an Ace modifier.
   if (!isMac) return n === "control" ? "meta" : n === "meta" ? null : ((n as Mod) ?? null);
   return (n as Mod) ?? null;
 };

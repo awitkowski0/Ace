@@ -1,4 +1,4 @@
-//! Process registry. EVERY child process Atelier spawns (pty, ssh, LSP, claude, git long-runners)
+//! Process registry. EVERY child process Ace spawns (pty, ssh, LSP, claude, git long-runners)
 //! must be registered here so it is killed on app exit.
 //!
 //!   let child = std::process::Command::new(..).spawn()?;
@@ -365,7 +365,7 @@ fn proc_start(_pid: u32) -> Option<u64> {
 // ---- pidfile ----
 
 fn pid_dir() -> Option<std::path::PathBuf> {
-    Some(dirs::data_dir()?.join("com.alexw.atelier").join("procs"))
+    Some(dirs::data_dir()?.join("com.alexw.ace").join("procs"))
 }
 fn own_file() -> Option<std::path::PathBuf> {
     Some(pid_dir()?.join(format!("{}.json", std::process::id())))
@@ -409,7 +409,7 @@ fn persist(r: &Registry) {
     }
 }
 
-/// Kill tracked children left behind by Atelier instances that died without cleaning up.
+/// Kill tracked children left behind by Ace instances that died without cleaning up.
 /// Returns how many processes were reaped.
 pub fn reap_stale() -> usize {
     let Some(dir) = pid_dir() else { return 0 };
@@ -428,7 +428,7 @@ pub fn reap_stale() -> usize {
         if f.owner == std::process::id() {
             continue;
         }
-        // Owner still running (another Atelier window/instance)? Leave its children alone.
+        // Owner still running (another Ace window/instance)? Leave its children alone.
         if f.owner_start != 0 && proc_start(f.owner) == Some(f.owner_start) {
             continue;
         }
@@ -507,7 +507,7 @@ pub fn procs_kill(id: u64) {
     kill(id)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))] // process groups, /bin/sh and libc signals
 mod tests {
     use super::*;
     use std::process::{Command, Stdio};

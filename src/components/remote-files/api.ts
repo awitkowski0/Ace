@@ -72,14 +72,14 @@ export const clearFinishedTransfers = () =>
 
 export function lsGet(key: string): string | null {
   try {
-    return localStorage.getItem("atelier.rf." + key);
+    return localStorage.getItem("ace.rf." + key);
   } catch {
     return null;
   }
 }
 export function lsSet(key: string, v: string) {
   try {
-    localStorage.setItem("atelier.rf." + key, v);
+    localStorage.setItem("ace.rf." + key, v);
   } catch {}
 }
 

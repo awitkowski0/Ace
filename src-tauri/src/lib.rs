@@ -1,3 +1,4 @@
+mod appenv;
 mod automation;
 mod claude;
 mod claude_hooks;
@@ -16,6 +17,7 @@ mod location;
 mod media;
 mod lsp;
 mod menu;
+mod migrate;
 mod procs;
 mod pstore;
 mod python;
@@ -32,15 +34,16 @@ pub use location::Location;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    migrate::run(); // copy pre-rename Atelier data to the Ace locations (once) before anything reads app data
     procs::install();
     let mut context = tauri::generate_context!();
-    // Harness runs must never talk to a real Atelier: with automation on, the single-instance socket is derived from the
-    // automation socket path (or ATELIER_INSTANCE_ID), so only processes sharing that socket form one instance.
+    // Harness runs must never talk to a real Ace: with automation on, the single-instance socket is derived from the
+    // automation socket path (or ACE_INSTANCE_ID), so only processes sharing that socket form one instance.
     if let Some(id) = instance_id() {
-        context.config_mut().identifier = format!("com.alexw.atelier.{id}");
+        context.config_mut().identifier = format!("com.alexw.ace.{id}");
     }
     tauri::Builder::default()
-        // Must be the first plugin: a second `atelier <path>` hands its argv to this instance and exits.
+        // Must be the first plugin: a second `ace <path>` hands its argv to this instance and exits.
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| windows::on_second_instance(app, argv, cwd)))
         .setup(|app| {
             menu::install(app.handle())?;
@@ -270,14 +273,14 @@ pub fn run() {
             godot::godot_open_editor,
         ])
         .build(context)
-        .expect("error while building Atelier")
+        .expect("error while building Ace")
         .run(|app, event| match event {
             tauri::RunEvent::ExitRequested { api, code, .. } => {
                 if windows::on_exit_requested(app, code) {
                     api.prevent_exit();
                 }
             }
-            // macOS open-file events: `open -a Atelier <folder>`, a folder dropped on the Dock icon.
+            // macOS open-file events: `open -a Ace <folder>`, a folder dropped on the Dock icon.
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => windows::on_opened(app, urls),
             // Quitting (or the signal handler) kills every tracked child (pty, ssh, LSP, claude), whatever window owns it.
@@ -292,7 +295,7 @@ pub fn run() {
 
 /// Isolation key for automation runs (None in normal use).
 fn instance_id() -> Option<String> {
-    if let Ok(id) = std::env::var("ATELIER_INSTANCE_ID") {
+    if let Ok(id) = crate::appenv::var("ACE_INSTANCE_ID") {
         if !id.is_empty() {
             return Some(id.chars().filter(|c| c.is_ascii_alphanumeric()).collect());
         }

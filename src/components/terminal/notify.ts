@@ -1,4 +1,4 @@
-/** Desktop notifications from OSC 9 / OSC 777, only while Atelier is not the focused app. */
+/** Desktop notifications from OSC 9 / OSC 777, only while Ace is not the focused app. */
 export interface QaHooks { notify?: (title: string, body: string) => boolean | void; openUrl?: (uri: string) => void }
 export const qaHooks: QaHooks = {};
 

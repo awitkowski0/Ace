@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Animation Studio suite (docs/ANIMSTUDIO.md). Fixtures live in a scratch temp dir; the web clip + pose set are READ-ONLY copies from
-// the MAIN Thematic-Collections checkout (another session edits it live: never asserted on, never written). Everything goes through the ATELIER_AUTOMATION harness (__qa.anim(), __qa.key) - never the real keyboard/mouse.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/animstudio.mjs
+// the MAIN Thematic-Collections checkout (another session edits it live: never asserted on, never written). Everything goes through the ACE_AUTOMATION harness (__qa.anim(), __qa.key) - never the real keyboard/mouse.
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/animstudio.mjs
 // Sections: A viewing/opening · B editing + text sync + undo · C viewport (pick/gizmo) · D spidey · T Thematic game preview (kinds, aim, spin, stride) · E timeline/tools · V viewport parity (camera/mouse/snap/face-resize/reference images) · G keymap (Blockbench defaults) · K limb links (constraints) + all-keys-selected badge · F Asset Dev
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1522,7 +1522,7 @@ try {
     await check("T1 every clip is labelled drawn / pose / stride, derived from the pose set (+ positions use, stride gait)", async () => {
       const s = await snapS();
       const k = s.clipKinds;
-      const rows = await app.ev(`return document.querySelectorAll('.as-arow [data-kind]').length`);
+      const rows = await app.ev(`return document.querySelectorAll('.as-arow[data-kind]').length`);
       const names = s.anims.length;
       const want = { web_flip_front: "drawn/playback", web_corkscrew_left: "drawn/playback", web_air_dive: "drawn/playback", web_tuck: "drawn/playback", web_sling_right: "pose/playback", web_land: "pose/ignored", web_run: "stride/ignored/walk", web_wall_run: "stride/ignored/walk", web_crawl: "stride/limb-driver/gait", web_ceiling_crawl: "stride/limb-driver/gait", web_climb: "stride/playback/walk" };
       const bad = Object.entries(want).filter(([n, v]) => k[n] !== v).map(([n, v]) => `${n}: ${k[n]} != ${v}`);

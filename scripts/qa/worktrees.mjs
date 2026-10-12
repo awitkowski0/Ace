@@ -2,7 +2,7 @@
 // Git worktrees: Switch Worktree popup (search, switch in place, new tab), New/Remove/Prune, entry points (branch widget, project widget,
 // Asset Dev "Other copies of this project"). Drives the app ONLY through the automation harness, on a scratch repo + worktrees in
 // $HOME/.cache-ace-wt-qa-* (outside $TMPDIR so the recent-projects declutter does not hide them). Never touches a real repo.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/worktrees.mjs      Screenshot: scripts/qa/out/worktrees.png
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/worktrees.mjs      Screenshot: scripts/qa/out/worktrees.png
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

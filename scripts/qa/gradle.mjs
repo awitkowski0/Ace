@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Gradle tool window suite (docs/GRADLE.md). Drives the app only through the ATELIER_AUTOMATION harness (never the real keyboard/mouse).
+// Gradle tool window suite (docs/GRADLE.md). Drives the app only through the ACE_AUTOMATION harness (never the real keyboard/mouse).
 // Scratch Gradle projects live under TMPDIR; their wrapper points at a distribution already in ~/.gradle/wrapper/dists (nothing is downloaded),
 // copied from ~/IdeaProjects/Thematic-Collections' wrapper (read only). Remote part: scratch dir /tmp/ace-qa-gradle-<pid> on `mc` (removed afterwards).
-// Usage: node scripts/qa/gradle.mjs [--no-remote] [--thematic]      Env: ATELIER_BIN
+// Usage: node scripts/qa/gradle.mjs [--no-remote] [--thematic]      Env: ACE_BIN
 //   --thematic: ONLY measure discovery on ~/IdeaProjects/Thematic-Collections (read only; nothing is run or written there) and exit.
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";

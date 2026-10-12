@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Welcome screen (no project open): declutter, worktree grouping, search, keyboard, remove-from-recent. Harness only.
-// Usage: ATELIER_BIN=src-tauri/target-qa/release/atelier node scripts/qa/welcome.mjs     Screenshot: scripts/qa/out/welcome.png
+// Usage: ACE_BIN=src-tauri/target-qa/release/ace node scripts/qa/welcome.mjs     Screenshot: scripts/qa/out/welcome.png
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,15 +13,15 @@ const sh = (c, cwd) => execSync(c, { cwd, stdio: "pipe", encoding: "utf8" });
 const repo = (name) => { const d = path.join(root, name); fs.mkdirSync(d); sh("git init -q -b main . && git -c user.email=q@q -c user.name=qa commit -q --allow-empty -m init", d); return d; };
 const tc = repo("Thematic-Collections");
 for (const w of ["spidey", "guide-tablet", "mc26", "storage"]) sh(`git worktree add -q -b ${w} ../Thematic-Collections-${w}`, tc);
-const kyf = repo("thematic-kyf"), heir = repo("HeirloomSite"), atelier = repo("Atelier");
+const kyf = repo("thematic-kyf"), heir = repo("HeirloomSite"), aceRepo = repo("Atelier");
 fs.mkdirSync(path.join(root, "never-opened"));
 const wt = (w) => path.join(root, `Thematic-Collections-${w}`);
 
 const home = os.homedir();
 const seed = [
-  wt("spidey"), kyf, tc + "/", heir, wt("guide-tablet"), atelier, wt("mc26"), wt("storage"),
-  "/private/var/folders/zz/abc123/T/atelier-qa-777/proj-a", "/tmp/scratch-proj", home + "/p/.claude/worktrees/fix-1",
-  path.join(root, "deleted-long-ago"), kyf, atelier + "/",
+  wt("spidey"), kyf, tc + "/", heir, wt("guide-tablet"), aceRepo, wt("mc26"), wt("storage"),
+  "/private/var/folders/zz/abc123/T/ace-qa-777/proj-a", "/tmp/scratch-proj", home + "/p/.claude/worktrees/fix-1",
+  path.join(root, "deleted-long-ago"), kyf, aceRepo + "/",
 ].map((p) => ({ host: "local", path: p })).concat([{ host: "mc", path: "/home/alexw/server-app" }]);
 
 let app, fails = 0;
@@ -34,11 +34,11 @@ const check = async (name, fn) => {
 const until = async (fn, ms = 10000) => { const t0 = Date.now(); for (;;) { const v = await fn().catch(() => null); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(100); } };
 const names = () => app.ev(`return [...document.querySelectorAll('.wl-row')].map(r => r.dataset.name + (r.dataset.kind === 'child' ? '(c)' : r.dataset.kind === 'group' ? '(g)' : ''))`);
 const key = (k) => app.ev(`const l = document.querySelector('[data-testid=welcome-list]'); l.focus(); l.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true })); return 1`);
-const stored = () => app.ev(`return JSON.parse(localStorage.getItem('atelier.recent') || '[]').map(l => l.host + ':' + l.path)`);
+const stored = () => app.ev(`return JSON.parse(localStorage.getItem('ace.recent') || '[]').map(l => l.host + ':' + l.path)`);
 
 try {
   app = await launch(null);
-  await app.ev(`localStorage.setItem('atelier.recent', ${JSON.stringify(JSON.stringify(seed))}); setTimeout(() => location.reload(), 50); return 1`);
+  await app.ev(`localStorage.setItem('ace.recent', ${JSON.stringify(JSON.stringify(seed))}); setTimeout(() => location.reload(), 50); return 1`);
   await sleep(800);
   await until(() => app.ev("return !!window.__qa && !!document.querySelector('[data-testid=welcome-list]')"), 20000);
   await sleep(1200); // lazy fs.stat probes
@@ -108,7 +108,7 @@ try {
   });
 
   // restore a fresh messy list for the screenshot
-  await app.ev(`localStorage.setItem('atelier.recent', ${JSON.stringify(JSON.stringify(seed))}); setTimeout(() => location.reload(), 50); return 1`);
+  await app.ev(`localStorage.setItem('ace.recent', ${JSON.stringify(JSON.stringify(seed))}); setTimeout(() => location.reload(), 50); return 1`);
   await sleep(800);
   await until(() => app.ev("return !!document.querySelector('[data-testid=welcome-list]')"), 20000);
   await sleep(1500);

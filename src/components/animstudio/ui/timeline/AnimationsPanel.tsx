@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { KIND_LABEL, KIND_TIP, addAnimation, animLength, deleteAnimation, duplicateAnimation, getAnimations, renameAnimation, setLength, setLoop, type ClipInfo, type LoopMode } from "../../core";
+import { KIND_TIP, addAnimation, animLength, deleteAnimation, duplicateAnimation, getAnimations, renameAnimation, setLength, setLoop, type ClipInfo, type LoopMode } from "../../core";
 import { confirmDialog, promptDialog } from "../../../shell/dialogs";
 import { showContextMenu } from "../../../shell/contextMenu";
 import { runAction } from "../../../../actions/registry";
@@ -137,7 +137,6 @@ function AnimRow(p: { name: string; selected: boolean; info?: ClipInfo; probs?: 
   const i = p.info;
   const m = /^(animation\.[^.]*\.|animation\.)?(.*)$/.exec(p.name)!;
   const chips: Array<{ cls: string; text: string; tip: string }> = [];
-  const shortKind = i ? { drawn: "drawn", pose: "pose", stride: "stride" }[i.kind] : "";
   if (i) {
     chips.push({ cls: "kind " + i.kind, text: i.kindLabel, tip: KIND_TIP[i.kind] });
     if (i.role) chips.push({ cls: "role", text: i.role, tip: "Role" });
@@ -154,18 +153,12 @@ function AnimRow(p: { name: string; selected: boolean; info?: ClipInfo; probs?: 
   const probTip = [p.probs?.e ? `${p.probs.e} error(s)` : "", p.probs?.w ? `${p.probs.w} warning(s)` : ""].filter(Boolean).join(", ");
   const tip = [p.name, ...chips.map((c) => `${c.tip}: ${c.text}`), probTip].filter(Boolean).join("\n");
   return (
-    <div className={"as-arow" + (p.selected ? " sel" : "")} onClick={p.onClick} onDoubleClick={p.onDouble} title={tip} data-anim={p.name}>
+    <div className={"as-arow" + (p.selected ? " sel" : "")} onClick={p.onClick} onDoubleClick={p.onDouble} title={tip} data-anim={p.name} data-kind={i?.kind}>
       <div className="nm">
         <span className="t"><i>{m[1] ?? ""}</i>{m[2]}</span>
-        {i && <span className={"as-kind " + i.kind} data-kind={i.kind} title={`${KIND_LABEL[i.kind]}: ${KIND_TIP[i.kind]}`}>{shortKind}</span>}
         {!!probTip && <i className={"pdot " + (p.probs?.e ? "err" : "warn")} />}
         <span className="as-hint">{p.length.toFixed(2)}s</span>
       </div>
-      {p.selected && chips.length > 0 && (
-        <div className="as-badges">
-          {chips.map((c) => <span key={c.text} className={"as-badge " + c.cls} title={c.tip}>{c.text}</span>)}
-        </div>
-      )}
     </div>
   );
 }

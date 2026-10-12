@@ -68,14 +68,14 @@ function renderAudit(ds: Decision[]): string {
   const meaning: Record<string, string> = {
     "keep-same": "same meaning in IntelliJ - Monaco keeps the key",
     "keep-widget": "only active while a Monaco widget (suggest, find input, snippet, hover, rename input, ...) needs it",
-    "remove-routed": "key is bound to a different IntelliJ action that Atelier implements; Monaco binding removed, Atelier action runs",
-    "remove-swallow": "key is bound to an IntelliJ action Atelier does not implement; Monaco binding removed and key swallowed in the editor",
+    "remove-routed": "key is bound to a different IntelliJ action that Ace implements; Monaco binding removed, Ace action runs",
+    "remove-swallow": "key is bound to an IntelliJ action Ace does not implement; Monaco binding removed and key swallowed in the editor",
     "remove-unbound": "Monaco-only binding, IntelliJ binds nothing there; removed",
   };
   for (const k of Object.keys(meaning)) lines.push(`| ${k} | ${count(k)} | ${meaning[k]} |`);
   lines.push("", `Total Monaco default bindings audited: ${ds.length}`, "");
   const sect = (title: string, kinds: string[]) => {
-    lines.push(`## ${title}`, "", "| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Atelier |", "|---|---|---|---|---|---|");
+    lines.push(`## ${title}`, "", "| key (IntelliJ syntax) | Monaco default | when | IntelliJ action(s) on that key | decision | Ace |", "|---|---|---|---|---|---|");
     const rows = ds.filter((d) => kinds.includes(d.kind)).sort((a, b) => a.binding.seq.localeCompare(b.binding.seq) || a.binding.command.localeCompare(b.binding.command));
     for (const d of rows) {
       const ij = d.ij.length ? d.ij.slice(0, 6).join(", ") + (d.ij.length > 6 ? ", ..." : "") : "-";
@@ -85,7 +85,7 @@ function renderAudit(ds: Decision[]): string {
     lines.push("");
   };
   sect("Kept (same meaning / widget keys)", ["keep-same", "keep-widget"]);
-  sect("Removed and routed to an Atelier action", ["remove-routed"]);
+  sect("Removed and routed to an Ace action", ["remove-routed"]);
   sect("Removed and swallowed (IntelliJ-bound, not implemented)", ["remove-swallow"]);
   sect("Removed (no IntelliJ binding)", ["remove-unbound"]);
   return lines.join("\n");

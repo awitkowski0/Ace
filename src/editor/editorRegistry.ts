@@ -31,7 +31,7 @@ export const triggerEditor = (id: string) => {
   const e = activeEditor();
   if (!e) return false;
   e.focus();
-  e.trigger("atelier", id, null);
+  e.trigger("ace", id, null);
   return true;
 };
 export const getEditor = (groupId: string) => editors.get(groupId);

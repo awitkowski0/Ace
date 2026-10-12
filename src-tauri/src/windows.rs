@@ -22,7 +22,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub const TAB_ID: &str = "atelier-projects";
+pub const TAB_ID: &str = "ace-projects";
 pub const PREFIX: &str = "project-";
 
 #[derive(Clone)]
@@ -153,7 +153,7 @@ mod mac {
         }
     }
 
-    /// Main thread only: bring the app to the front (a launched / re-invoked `atelier <path>` must show its window).
+    /// Main thread only: bring the app to the front (a launched / re-invoked `ace <path>` must show its window).
     pub fn activate() {
         if let Some(mtm) = objc2_foundation::MainThreadMarker::new() {
             #[allow(deprecated)]
@@ -316,10 +316,10 @@ pub fn create_window(app: &AppHandle, project: Option<Location>, anchor: Option<
 // ---------- persistence ----------
 
 fn data_dir() -> Option<std::path::PathBuf> {
-    if let Some(d) = std::env::var_os("ATELIER_DATA_DIR") {
+    if let Some(d) = crate::appenv::var_os("ACE_DATA_DIR") {
         return Some(d.into());
     }
-    Some(dirs::data_dir()?.join("com.alexw.atelier"))
+    Some(dirs::data_dir()?.join("com.alexw.ace"))
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -408,7 +408,7 @@ pub fn startup(app: &AppHandle) {
     }
 }
 
-/// `atelier <path>` second process / `open -a Atelier <folder>`: open (or focus) the project as a tab.
+/// `ace <path>` second process / `open -a Ace <folder>`: open (or focus) the project as a tab.
 pub fn open_or_focus(app: &AppHandle, loc: Location) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -446,7 +446,7 @@ pub fn on_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
     }
 }
 
-/// macOS open-file events (`open -a Atelier <folder>`, dropping a folder on the Dock icon).
+/// macOS open-file events (`open -a Ace <folder>`, dropping a folder on the Dock icon).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn on_opened(app: &AppHandle, urls: Vec<tauri::Url>) {
     for u in urls {
@@ -635,7 +635,7 @@ pub async fn win_tabbed(app: AppHandle, window: WebviewWindow) -> bool {
     tab_labels(&app, window.label()).len() > 1
 }
 
-/// QA only (ATELIER_AUTOMATION=1): what AppKit thinks about the calling window's tabbing.
+/// QA only (ACE_AUTOMATION=1): what AppKit thinks about the calling window's tabbing.
 #[tauri::command]
 pub async fn win_debug(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value, String> {
     if !crate::automation::enabled() {

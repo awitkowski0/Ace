@@ -36,7 +36,7 @@ export default function App() {
           {!root ? (
             ready ? <Welcome /> : null
           ) : (
-            <PanelGroup direction="horizontal" autoSaveId={`atelier:${pk}:h`} key={pk}>
+            <PanelGroup direction="horizontal" autoSaveId={`ace:${pk}:h`} key={pk}>
               {left && (
                 <Fragment>
                   <Panel id="left" order={1} defaultSize={20} minSize={10} maxSize={50}><ToolWindowFrame tw={left} root={root} /></Panel>
@@ -44,7 +44,7 @@ export default function App() {
                 </Fragment>
               )}
               <Panel id="center" order={2} minSize={20}>
-                <PanelGroup direction="vertical" autoSaveId={`atelier:${pk}:v`}>
+                <PanelGroup direction="vertical" autoSaveId={`ace:${pk}:v`}>
                   <Panel id="editor" order={1} minSize={15}>
                     <Suspense fallback={null}><EditorArea /></Suspense>
                   </Panel>

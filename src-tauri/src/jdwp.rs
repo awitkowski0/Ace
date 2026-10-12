@@ -200,10 +200,10 @@ fn read_pkt(s: &mut TcpStream) -> std::io::Result<Pkt> {
 
 // ---------------------------------------------------------------- connection
 
-/// `ATELIER_JDWP_TRACE=1`: every packet to stderr (debugging the debugger).
+/// `ACE_JDWP_TRACE=1`: every packet to stderr (debugging the debugger).
 fn trace() -> bool {
     static T: OnceLock<bool> = OnceLock::new();
-    *T.get_or_init(|| std::env::var_os("ATELIER_JDWP_TRACE").is_some())
+    *T.get_or_init(|| crate::appenv::var_os("ACE_JDWP_TRACE").is_some())
 }
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join("")

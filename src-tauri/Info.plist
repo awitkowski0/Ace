@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- `open -a Atelier <folder>` / dropping a folder on the Dock icon delivers an open-file event (RunEvent::Opened). -->
+  <!-- `open -a Ace <folder>` / dropping a folder on the Dock icon delivers an open-file event (RunEvent::Opened). -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

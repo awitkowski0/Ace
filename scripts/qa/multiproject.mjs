@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // Multi-project windows (one project per native macOS tab). Drives the app ONLY through the automation harness.
-// Launches Atelier on scratch projects A/B/C (never a real project), asserts tabbing, switching, dedupe, per-window event
-// isolation, per-window child cleanup, single instance (second `atelier <C>` process), dirty-close prompt, session restore,
+// Launches Ace on scratch projects A/B/C (never a real project), asserts tabbing, switching, dedupe, per-window event
+// isolation, per-window child cleanup, single instance (second `ace <C>` process), dirty-close prompt, session restore,
 // and reports the memory cost of each extra project window.
-// Usage: node scripts/qa/multiproject.mjs        Env: ATELIER_BIN, SCRATCH (parent dir for the scratch projects)
+// Usage: node scripts/qa/multiproject.mjs        Env: ACE_BIN, SCRATCH (parent dir for the scratch projects)
 import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BIN, launch, sleep } from "./lib.mjs";
 
-const scratch = fs.mkdtempSync(path.join(process.env.SCRATCH || process.env.TMPDIR || os.tmpdir(), "atelier-mp-"));
+const scratch = fs.mkdtempSync(path.join(process.env.SCRATCH || process.env.TMPDIR || os.tmpdir(), "ace-mp-"));
 const mk = (name) => {
   const d = path.join(scratch, name);
   fs.mkdirSync(path.join(d, "src"), { recursive: true });
@@ -76,7 +76,7 @@ try {
   await sleep(1500);
   await check("two windows share the tabbing identifier and are tabbed together (NSWindow.tabbedWindows == 2)", async () => {
     const [a, b] = await Promise.all([dbg(lA), dbg(lB)]);
-    const ok = a.tabbingIdentifier === "atelier-projects" && b.tabbingIdentifier === "atelier-projects" && a.tabbedWindows === 2 && b.tabbedWindows === 2 && a.tabbingMode === 1 && b.tabbingMode === 1;
+    const ok = a.tabbingIdentifier === "ace-projects" && b.tabbingIdentifier === "ace-projects" && a.tabbedWindows === 2 && b.tabbedWindows === 2 && a.tabbingMode === 1 && b.tabbingMode === 1;
     return { ok, note: `A=${a.tabbingIdentifier}/mode${a.tabbingMode}/tabs${a.tabbedWindows} B=${b.tabbingIdentifier}/mode${b.tabbingMode}/tabs${b.tabbedWindows} order=${a.tabbedLabels}` };
   });
   await check("new project window is active (selected tab) and its project is B", async () => ({ ok: (await active()) === lB, note: `active=${await active()} B=${lB} isKey A=${(await dbg(lA)).isKey} B=${(await dbg(lB)).isKey}` }));
@@ -189,7 +189,7 @@ try {
   });
 
   // ---- single instance ----
-  await check("second `atelier <C>` process hands over to the running instance, opens C as a tab, and exits", async () => {
+  await check("second `ace <C>` process hands over to the running instance, opens C as a tab, and exits", async () => {
     const t0 = Date.now();
     const p2 = spawn(BIN, [C], { env: app.env, stdio: "ignore" });
     const code = await stopped(p2, 10000);
@@ -199,7 +199,7 @@ try {
     const lC = labelOf(w ?? [], C);
     const d = lC ? await dbg(lC) : null;
     mp.lC = lC;
-    return { ok: code === 0 && !!w && !!d && d.tabbedWindows === 2 && d.tabbingIdentifier === "atelier-projects" && (await active()) === lC, note: `exit=${code} in ${exitMs}ms, windows=${w?.length}, C tabs=${d?.tabbedWindows}, active=${await active()}` };
+    return { ok: code === 0 && !!w && !!d && d.tabbedWindows === 2 && d.tabbingIdentifier === "ace-projects" && (await active()) === lC, note: `exit=${code} in ${exitMs}ms, windows=${w?.length}, C tabs=${d?.tabbedWindows}, active=${await active()}` };
   });
   await check("second process with the already-open project A focuses its tab (no extra window)", async () => {
     const p2 = spawn(BIN, [A], { env: app.env, stdio: "ignore" });
@@ -265,7 +265,7 @@ try {
     await sleep(300);
     const s1 = await app.evIn(w1.label, "return __qa.state().toolWindows");
     const s2 = await app.evIn(w2.label, "return __qa.state().toolWindows");
-    const stored = await app.evIn(w1.label, `return Object.entries(localStorage).filter(([k])=>k.startsWith('atelier.layout.')).map(([k,v])=>[k,JSON.parse(v).bottom])`);
+    const stored = await app.evIn(w1.label, `return Object.entries(localStorage).filter(([k])=>k.startsWith('ace.layout.')).map(([k,v])=>[k,JSON.parse(v).bottom])`);
     return { ok: s1.bottom === "terminal" && s2.bottom !== "terminal" && stored.some(([k, b]) => k.includes(w1.project.path) && b === "terminal"), note: `w1.bottom=${s1.bottom} w2.bottom=${s2.bottom} stored=${JSON.stringify(stored.map(([k, b]) => [path.basename(k), b]))}` };
   });
 

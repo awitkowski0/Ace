@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Performance bench driver (see scripts/bench.sh, docs/PERF.md). Release build, real project, automation harness only.
-// Env: PROJ (default ~/thematic-kyf), ATELIER_BIN, BENCH_TMP (synthetic 10k dir parent), RUNS (cold-start runs, default 5), OUT (json path)
+// Env: PROJ (default ~/thematic-kyf), ACE_BIN, BENCH_TMP (synthetic 10k dir parent), RUNS (cold-start runs, default 5), OUT (json path)
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,7 +8,7 @@ import path from "node:path";
 import { launch, sleep, repo, BIN } from "./lib.mjs";
 
 const proj = process.env.PROJ || path.join(os.homedir(), "thematic-kyf");
-const tmp = process.env.BENCH_TMP || path.join(process.env.TMPDIR || os.tmpdir(), "atelier-bench");
+const tmp = process.env.BENCH_TMP || path.join(process.env.TMPDIR || os.tmpdir(), "ace-bench");
 const RUNS = +(process.env.RUNS || 5);
 const sh = (c) => { try { return execSync(c, { encoding: "utf8", maxBuffer: 1 << 28 }).trim(); } catch { return ""; } };
 const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];

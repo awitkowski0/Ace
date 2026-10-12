@@ -39746,6 +39746,7 @@ function copyAirFix(anim, bone, time3, ref, alsoAt) {
 }
 
 // src/components/profiles/assets.ts
+var PACK_DATA = { armors: "suit", huds: "hud", flight_profiles: "flight" };
 var NO_RULES = { include: [], hide: [], suitRoot: null, baseBranch: [], branchPrefix: null };
 var rules = NO_RULES;
 var EXCLUDED = /* @__PURE__ */ new Set(["build", ".gradle", "node_modules", ".git", ".claude", ".idea", "run", "runs", "minecraft-src", "target", "out", "dist"]);
@@ -39793,8 +39794,17 @@ function classifyBuiltin(file2, dirs) {
     if (!isCtl && CODE_EXT.has(extOf(file2))) return null;
     return { type: isCtl ? "controller" : "pose", kind: null, name: bareName(file2), sub: dirs.slice(di + 3).join("/"), inTree: true };
   }
+  if (di >= 0 && !dirs.includes("assets") && dirs.length > di + 2 && PACK_DATA[dirs[di + 2]]) {
+    const t = PACK_DATA[dirs[di + 2]];
+    const e = extOf(file2);
+    if (e !== "json" && !(t === "hud" && e === "js")) return null;
+    return { type: t, kind: null, name: bareName(file2), sub: dirs.slice(di + 3).join("/"), inTree: true };
+  }
   const ext = extOf(file2);
   const ai = dirs.indexOf("assets");
+  if (ai >= 0 && dirs[ai + 2] === "guide" && ext === "json" && (dirs[ai + 5] === "entries" || dirs[ai + 5] === "categories")) {
+    return { type: "guide", kind: null, name: bareName(file2), sub: dirs.slice(ai + 6).join("/"), inTree: true };
+  }
   if (ai >= 0 && lower === "sounds.json" && dirs.length === ai + 2) return { type: "sound", kind: null, name: "sounds", sub: "", inTree: true };
   let type = null;
   let typeAt = -1;
@@ -39836,7 +39846,7 @@ function classifyBuiltin(file2, dirs) {
   const subStart = kindAt >= 0 ? kindAt + 1 : typeAt >= 0 ? typeAt + 1 : dirs.length;
   return { type, kind, name: assetName(file2), sub: dirs.slice(subStart).join("/"), inTree: type !== "other" };
 }
-var TYPE_WORD = { model: "model", animation: "animation", texture: "texture", sound: "sound", lang: "text", pose: "pose", particle: "particle", controller: "animation controller", data: "data file", other: "file" };
+var TYPE_WORD = { model: "model", animation: "animation", texture: "texture", sound: "sound", lang: "text", pose: "pose", particle: "particle", controller: "animation controller", suit: "suit", hud: "HUD", flight: "flight profile", guide: "guide page", data: "data file", other: "file" };
 function suggestMessage(changes) {
   const rows = changes.map((c) => ({ c, info: classifyAsset(c.path) })).filter((r2) => r2.info);
   if (!rows.length) return "";

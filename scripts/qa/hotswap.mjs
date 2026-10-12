@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Gradle Debug runs + single-file hot swap suite (docs/GRADLE.md "Debug & hot swap"). Drives the app only through the ATELIER_AUTOMATION harness
+// Gradle Debug runs + single-file hot swap suite (docs/GRADLE.md "Debug & hot swap"). Drives the app only through the ACE_AUTOMATION harness
 // (never the real keyboard/mouse). Scratch Gradle projects live under TMPDIR; the wrapper points at a distribution already in
 // ~/.gradle/wrapper/dists (copied from ~/IdeaProjects/Thematic-Collections' wrapper, read only), so nothing is downloaded.
-// Usage: node scripts/qa/hotswap.mjs [--thematic]      Env: ATELIER_BIN
+// Usage: node scripts/qa/hotswap.mjs [--thematic]      Env: ACE_BIN
 //   --thematic: ALSO run the read-only `aceDumpClasspath` on ~/IdeaProjects/Thematic-Collections (nothing is run or written there; git status
 //               before/after, no .ace/) for several files: root (:1.20.1 fabric glue), common, 26.2 subproject, the nested Forge build.
 import { execSync } from "node:child_process";
@@ -58,7 +58,7 @@ function gradleExpired(pid) {
 // daemons of other Gradle user homes (other agents' tests use temp homes that they delete) have no log in ~/.gradle: not Alex's, not ours
 const inOwnHome = (pid) => sh(`ls ${os.homedir()}/.gradle/daemon/*/daemon-${pid}.out.log 2>/dev/null`).trim() !== "";
 const lostDaemons = (before) => before.filter((p) => !alive(p) && inOwnHome(p) && !gradleExpired(p));
-const pidsMatching = (needle) => sh(`ps -axo pid,command | grep -F -e ${JSON.stringify(needle)} | grep -v grep | grep -v "release/atelier"`).split("\n").filter(Boolean).map((l) => +l.trim().split(/\s+/)[0]);
+const pidsMatching = (needle) => sh(`ps -axo pid,command | grep -F -e ${JSON.stringify(needle)} | grep -v grep | grep -v "release/ace"`).split("\n").filter(Boolean).map((l) => +l.trim().split(/\s+/)[0]);
 
 // ---------------------------------------------------------------- scratch project (Forge-like layout: a nested Exec build)
 function wrapperFiles(dest) {
@@ -417,7 +417,7 @@ try {
     return { ok: d.exit !== null && jvm.length === 0 && clientsLeft.length === 0 && lost.length === 0 && st.status === "ended" && fs.readdirSync(path.join(dataDir, "gradle")).every((f) => !f.includes(`ace-debug-${port}`)), note: JSON.stringify({ exit: d.exit, jvm, clientsLeft, daemonsBefore: before.length, lost, files: fs.readdirSync(path.join(dataDir, "gradle")) }) };
   });
   await check("Stop was not Gradle's cancel only: nothing of this project's run is left (no client, no JVM, no scratch java)", async () => {
-    const left = sh(`ps -axo pid,command | grep -F -e ${JSON.stringify(scratch)} | grep -v grep | grep -v GradleDaemon | grep -v "release/atelier"`).trim();
+    const left = sh(`ps -axo pid,command | grep -F -e ${JSON.stringify(scratch)} | grep -v grep | grep -v GradleDaemon | grep -v "release/ace"`).trim();
     return { ok: left === "", note: left.slice(0, 300) };
   });
 
@@ -574,8 +574,8 @@ if (args.includes("--thematic")) {
 
 // ---------------------------------------------------------------- cleanup + summary
 await sleep(500);
-const strays = sh(`ps -axo pid,command | grep -E ${JSON.stringify(`${scratch}|${scratch2}`)} | grep -v grep | grep -v GradleDaemon | grep -v "release/atelier"`).trim();
-const rt = sh("pgrep -fl 'target.*/release/atelier' | grep -v pgrep").trim();
+const strays = sh(`ps -axo pid,command | grep -E ${JSON.stringify(`${scratch}|${scratch2}`)} | grep -v grep | grep -v GradleDaemon | grep -v "release/ace"`).trim();
+const rt = sh("pgrep -fl 'target.*/release/ace' | grep -v pgrep").trim();
 rows.push({ name: "no stray scratch processes", ok: strays === "" });
 console.log(`${strays === "" ? "PASS" : "FAIL"}  no stray scratch JVM/clients${strays ? "  - " + strays.slice(0, 300) : ""}`);
 console.log("app processes still running:", rt || "(none)");

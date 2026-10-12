@@ -39,7 +39,7 @@ pub fn command(host: &str, tty: bool) -> Command {
 /// there plain `ssh` runs one connection per call.
 #[cfg(not(windows))]
 fn mux_args() -> &'static [&'static str] {
-    &["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ControlPersist=120"]
+    &["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/ace-%C", "-o", "ControlPersist=120"]
 }
 #[cfg(windows)]
 fn mux_args() -> &'static [&'static str] {
@@ -85,7 +85,7 @@ fn close_master(host: &str) {
         return; // no ControlMaster to close (see mux_args)
     }
     let _ = Command::new("ssh")
-        .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ConnectTimeout=2", "-O", "exit", host])
+        .args(["-o", "ControlPath=~/.ssh/ace-%C", "-o", "ConnectTimeout=2", "-O", "exit", host])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -142,7 +142,7 @@ pub fn close_all() {
     let hosts: Vec<String> = used_hosts().lock().unwrap().iter().cloned().collect();
     for h in hosts {
         let _ = Command::new("ssh")
-            .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ConnectTimeout=2", "-O", "exit", &h])
+            .args(["-o", "ControlPath=~/.ssh/ace-%C", "-o", "ConnectTimeout=2", "-O", "exit", &h])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
