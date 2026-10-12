@@ -19,7 +19,17 @@ export interface Marker {
   color: string;
   label: string;
   /** a beam preview along `dir`: length in px and thickness in px */
-  beam?: { length: number; width: number; end?: string };
+  beam?: { length: number; width: number; end?: string;
+    /** the core's colour (`end` is the glow's); with `glow` the beam is drawn as an opaque core inside a soft halo */
+    core?: string;
+    /** the halo's radius in px (the core's is `width`) */
+    glow?: number;
+    /** beams side by side, `spacing` px apart */
+    count?: number;
+    spacing?: number;
+    /** the beam goes on past `length`: its last stretch fades out */
+    fade?: boolean;
+    opacity?: number };
   /** a flame cone along `dir` */
   flame?: { length: number; width: number; core: string; outer: string };
   /** cones along `dir` drawn the way JetFlameRenderer does (flame cones, nozzle glow, anti-grav pad); wins over `flame` */
@@ -190,6 +200,7 @@ export function Viewport3D({ rig, texture, markers, selected, onSelect, onDrag, 
     k.labels.textContent = "";
     k.groups.clear();
     const Y = new THREE.Vector3(0, 1, 0);
+    const beamInfo = new Map<string, string>();
     for (const m of markers) {
       const sel = m.id === selected;
       // everything of one marker hangs off a group at its place, turned so +Y runs along `dir`: a live frame only moves the group
@@ -207,11 +218,29 @@ export function Viewport3D({ rig, texture, markers, selected, onSelect, onDrag, 
       g.add(ball);
       if (m.dir) {
         if (m.beam) {
-          const len = m.beam.length;
-          const geo = new THREE.CylinderGeometry(m.beam.width, m.beam.width, len, 10, 1, true);
-          geo.translate(0, len / 2, 0);
-          const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(m.beam.end ?? m.color), transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
-          g.add(new THREE.Mesh(geo, mat));
+          const b = m.beam;
+          const n = Math.max(1, Math.min(8, Math.round(b.count ?? 1)));
+          const len = b.length;
+          const fadeLen = b.fade ? Math.min(len * 0.3, 48) : 0;
+          // cylinders along +Y of the marker's group (which runs along `dir`), from the origin out; the last stretch fades
+          const cyl = (r: number, y0: number, y1: number, col: string, op: number, x: number) => {
+            const geo = new THREE.CylinderGeometry(r, r, y1 - y0, 12, 1, true);
+            geo.translate(x, (y0 + y1) / 2, 0);
+            g.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(col), transparent: true, opacity: op, depthWrite: false, side: THREE.DoubleSide })));
+          };
+          const op = b.opacity ?? 1;
+          for (let i = 0; i < n; i++) {
+            const x = (i - (n - 1) / 2) * (b.spacing ?? 0);
+            const parts: Array<[number, number, number]> = [[0, len - fadeLen, 1]];
+            if (fadeLen) for (let k = 0; k < 3; k++) parts.push([len - fadeLen + (fadeLen * k) / 3, len - fadeLen + (fadeLen * (k + 1)) / 3, [0.6, 0.35, 0.15][k]]);
+            for (const [y0, y1, f] of parts) {
+              if (b.glow !== undefined) {
+                cyl(b.glow, y0, y1, b.end ?? m.color, 0.3 * f * op, x);
+                cyl(b.width, y0, y1, b.core ?? "#FFFFFF", 0.9 * f * op, x);
+              } else cyl(b.width, y0, y1, b.end ?? m.color, 0.55 * f, x);
+            }
+          }
+          beamInfo.set(m.id, JSON.stringify({ n, r: b.width, glow: b.glow ?? b.width, len, fade: !!b.fade }));
         } else if (m.cones) {
           addCones(k, g, m.cones);
         } else if (m.flame) {
@@ -233,6 +262,8 @@ export function Viewport3D({ rig, texture, markers, selected, onSelect, onDrag, 
       lab.textContent = m.label;
       lab.dataset.id = m.id;
       lab.dataset.pos = m.pos.map((n) => Math.round(n * 100) / 100).join(","); // where the marker is, for tests and tooltips
+      const bi = beamInfo.get(m.id);
+      if (bi) lab.dataset.beam = bi; // what was built for its beam (px), for tests
       lab.onclick = () => cb.current.onSelect(m.id);
       k.labels.appendChild(lab);
     }

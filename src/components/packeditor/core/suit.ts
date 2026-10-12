@@ -104,6 +104,8 @@ export function beamOf(a: SuitAbility | undefined): Record<BeamKey, unknown> {
 
 export const abilityName = (id: string) => (id.includes(":") ? id.slice(id.indexOf(":") + 1) : id);
 export const nsOf = (id: string, d = "thematic") => (id.includes(":") ? id.slice(0, id.indexOf(":")) : d);
+/** Does a suit's ability identifier name the ability `name` of namespace `ns`? A bare id is a `thematic` one (docs/addon-format.md). */
+export const nameMatches = (id: string, ns: string, name: string) => abilityName(id) === name && nsOf(id) === ns;
 
 // ---------------------------------------------------------------- ability scripts: where things come out
 

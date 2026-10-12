@@ -39,6 +39,10 @@ describe("scanCalls", () => {
     expect(str(o, "when")).toBe("notAiming");
     expect(HUD.slice(o.s, o.e)).toMatch(/^\{[\s\S]*\}$/);
   });
+  it("an expression-bodied arrow is one call on its parameter", () => {
+    const calls = scanCalls(`c.press(p => p.then("go"));`);
+    expect(callsOn(calls, fnArg(calls.find((c) => c.method === "press")!)).map((c) => c.method)).toEqual(["then"]);
+  });
   it("opaque values survive; nested callbacks are not mistaken for siblings", () => {
     const src = `c.console({ group: GROUP }, con => {
   con.page("p", { label: "l" }, page => {

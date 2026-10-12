@@ -154,3 +154,29 @@
 .pe-clip-note { color: #f5a524; font-size: 11px; white-space: nowrap; }
 .pe-langnote { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-dim); }
 .pe-bar:empty { display: none; }
+
+/* beam look + timing (AbilityView) */
+.pe-note.warn { color: var(--nord12); }
+.pe-bf { display: flex; align-items: flex-start; gap: 4px; }
+.pe-bf-w { flex: 1; min-width: 0; }
+.pe-bf-x { flex: none; width: 14px; text-align: center; padding: 3px 0 0; }
+.pe-layer { flex: none; margin-top: 4px; padding: 0 5px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--fg-dim); border: 1px solid var(--border); white-space: nowrap; max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
+.pe-layer.visual { color: var(--nord14); border-color: var(--nord14); }
+.pe-layer.suit { color: var(--nord8); border-color: var(--nord8); }
+.pe-phase { padding: 2px 0 4px; }
+.pe-phase.sel { background: var(--bg-hover); border-radius: 4px; }
+.pe-phase .pe-note { padding: 0 0 0 4px; font-size: 11px; }
+.pe-tl-stage { align-items: flex-start; }
+.pe-tl { width: 100%; max-width: 900px; padding-top: 24px; }
+.pe-tl-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; color: var(--fg-dim); font-size: 12px; }
+.pe-tl-press { padding: 2px 8px; border-radius: 10px; background: var(--accent-bg); color: #eceff4; }
+.pe-tl-bar { display: flex; gap: 2px; min-height: 64px; }
+.pe-tl-seg { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 8px; border-radius: 4px; background: var(--nord10); color: #eceff4; overflow: hidden; cursor: default; }
+.pe-tl-seg.phase { cursor: pointer; }
+.pe-tl-seg.cooldown { background: var(--nord3); }
+.pe-tl-seg.ready { background: var(--nord14); color: #2e3440; }
+.pe-tl-seg.open { background: repeating-linear-gradient(135deg, var(--nord10) 0 6px, var(--nord9) 6px 12px); }
+.pe-tl-seg.sel { outline: 2px solid var(--accent); }
+.pe-tl-n { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-tl-s { font-size: 12px; font-family: var(--font-mono); }
+.pe-tl-t { font-size: 10px; opacity: .75; font-family: var(--font-mono); }

@@ -57,8 +57,10 @@ const fmt = (v: number, step: number) => {
 };
 
 /** A number box; dragging the row's label scrubs it (shift: x10 finer, alt: x10 coarser). */
-export function NumberField({ label, value, onChange, step = 0.01, min, max, doc, testId, placeholder }: {
+export function NumberField({ label, value, onChange, step = 0.01, min, max, doc, testId, placeholder, onClear }: {
   label: string; value: number | undefined; onChange: Commit<number>; step?: number; min?: number; max?: number; doc?: string; testId?: string; placeholder?: number;
+  /** emptying the box calls this (the value goes back to its default) */
+  onClear?: () => void;
 }) {
   const clamp = (v: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, v));
   const base = useRef(0);
@@ -77,7 +79,7 @@ export function NumberField({ label, value, onChange, step = 0.01, min, max, doc
         value={draft ?? (shown === undefined ? "" : fmt(shown, step))}
         onFocus={() => { base.current = shown ?? 0; }}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { if (draft !== null) { const n = Number(draft); if (draft.trim() !== "" && Number.isFinite(n)) onChange(clamp(n)); setDraft(null); } }}
+        onBlur={() => { if (draft !== null) { const n = Number(draft); if (draft.trim() === "") { if (value !== undefined) onClear?.(); } else if (Number.isFinite(n)) onChange(clamp(n)); setDraft(null); } }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           else if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }

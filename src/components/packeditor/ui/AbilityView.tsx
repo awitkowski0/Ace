@@ -3,27 +3,37 @@
  * and, when it has them, its command console (pages, desktop windows, widgets, theme - Ultron's Hive Control) and its
  * radial wheel, laid out the way the client draws them.
  */
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { NumVec3 } from "../../animstudio/core";
 import { POINTS, POINT_DOC, anchorFrame, anchorValue, offsetForSceneDelta, type AnchorSpec } from "../core/anchors";
 import { clampRect, readConsole, setConsoleProps, themeTokens, THEME_KEYS, type ConsoleModel, type ConsoleTarget, type ConsoleWindow } from "../core/console";
-import { packRoot } from "../core/kinds";
-import { readRenderSources, setRenderFrom, type RenderSource } from "../core/suit";
+import { effectiveBeam, fromHands, readBeamVisuals, setBeamOption, setSuitBeam, suitAbilityIndex, suitBeamOwn, type BeamVisual } from "../core/beam";
+import { applyEdits } from "../core/jsdsl";
+import { packRoot, stem } from "../core/kinds";
+import { readRenderSources, readSuit, setRenderFrom, type RenderSource } from "../core/suit";
+import { addTimingRow, buildTimeline, findStatRows, findTuneRows, setLastsLiteral, setStatCell, setTuneCell, type StatRow, type TuneRow, type StatCol, type TimingCtx } from "../core/timing";
 import { loadSuitModel, useAsync } from "./data";
+import { BeamInspector, type CrossStatus, type SuitLayer } from "./BeamPanel";
+import { TimelineView, TimingInspector, type TimingStatus } from "./TimingPanel";
+import { currentText, editFile } from "./crossFile";
+import { loadTimingFiles, newRowTarget, type TimingFiles } from "./timingData";
 import { Docks, ParseError, type ViewProps } from "./PackView";
 import { listData, resourceRoots, tr, translations } from "./resolve";
 import { addAbilityLang, awaitingLang, langPath } from "./newAbilityData";
 import { capture, BoolField, ColorField, Empty, EnumField, NumberField, Section, SceneTree, TextField, Vec3Field, type TreeNode } from "./widgets";
 import { Viewport3D, type Marker } from "./Viewport3D";
 import { playerRigModel } from "../../animstudio/ui/model";
+import { openFile } from "../../../editor/store";
 
 const PLAYER = playerRigModel();
 
-type Tab = "renders" | "console" | "wheel";
+type Tab = "renders" | "beam" | "timing" | "console" | "wheel";
+const NO_FILES: TimingFiles = { files: [], ownDefaults: [] };
+const baseName = (p: string) => p.replace(/\\/g, "/").split("/").pop() ?? p;
 
 export default function AbilityView({ host, path, text, edit }: ViewProps) {
   const parsed = useMemo(() => {
-    try { return { sources: readRenderSources(text), console: readConsole(text), error: null }; } catch (e) { return { sources: [] as RenderSource[], console: null as ConsoleModel | null, error: e }; }
+    try { return { sources: readRenderSources(text), beams: readBeamVisuals(text), console: readConsole(text), error: null }; } catch (e) { return { sources: [] as RenderSource[], beams: [] as BeamVisual[], console: null as ConsoleModel | null, error: e }; }
   }, [text]);
   const pr = packRoot(path);
   const [roots] = useAsync(() => resourceRoots(host, path), [host, path], [] as string[]);
@@ -38,8 +48,45 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
   const [page, setPage] = useState<string | null>(null);
   const drag = useRef<{ id: string; base: AnchorSpec } | null>(null);
 
+  // ---- the beam's suit layer and the timing sheets: other files, read through the buffer when they are open
+  const name = stem(path);
+  const isJs = path.endsWith(".js");
+  const [rev, setRev] = useState(0);
+  const suitEntry = suits.find((s) => s.id === preview);
+  const [suitFile] = useAsync(() => (suitEntry ? currentText(host, suitEntry.path) : Promise.resolve(null)), [suitEntry?.path, rev], null as string | null);
+  const suitLayer: SuitLayer | null = useMemo(() => {
+    if (!suitEntry) return null;
+    const index = suitFile && pr ? suitAbilityIndex(suitFile, pr.ns, name) : -1;
+    return { id: suitEntry.id, path: suitEntry.path, index, own: index >= 0 && suitFile ? suitBeamOwn(suitFile, index) : {} };
+  }, [suitEntry, suitFile, name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const suitOptions = useMemo(() => {
+    if (!suitFile || !suitLayer || suitLayer.index < 0) return undefined;
+    try { return readSuit(suitFile).abilities[suitLayer.index]?.options; } catch { return undefined; }
+  }, [suitFile, suitLayer]);
+  const [tfiles] = useAsync(() => (roots.length && pr && isJs ? loadTimingFiles(host, roots, pr) : Promise.resolve(NO_FILES)), [roots, rev, isJs], NO_FILES);
+  const stats = useMemo(() => findStatRows(tfiles.files, name), [tfiles, name]);
+  const ctx: TimingCtx = useMemo(() => ({ stat: stats[0], tune: findTuneRows(tfiles.files, name), suitOptions }), [stats, tfiles, name, suitOptions]);
+  const timeline = useMemo(() => buildTimeline(text, ctx), [text, ctx]);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const [xstatus, setXStatus] = useState<{ beam: CrossStatus | null; timing: TimingStatus | null; err: string | null }>({ beam: null, timing: null, err: null });
+  /** Edit another file, one at a time; reports how it went under the section that asked. */
+  const cross = useCallback((which: "beam" | "timing", file: string, fn: (cur: string) => string | null) => {
+    queue.current = queue.current.then(async () => {
+      try {
+        const r = await editFile(host, file, fn);
+        if (!r) return;
+        const st = { via: r.via, name: baseName(file), undo: r.undo ? () => { void r.undo!().then((ok) => { setXStatus((x) => ({ ...x, [which]: null, err: ok ? null : `${baseName(file)} changed since, so it was not restored.` })); setRev((n) => n + 1); }); } : undefined };
+        setXStatus((x) => ({ ...x, [which]: st, err: null }));
+        setRev((n) => n + 1);
+      } catch (e) { setXStatus((x) => ({ ...x, err: String((e as Error)?.message ?? e) })); }
+    });
+  }, [host]);
+
   if (parsed.error) return <ParseError error={parsed.error} />;
-  const { sources, console: con } = parsed;
+  const { sources, beams, console: con } = parsed;
+  const beamSrc = sources.filter((s) => s.kind === "thematic:beam").map((s) => s.index);
+  const beamIdxOfSource = (si: number) => beamSrc.indexOf(si);
+  const target = pr ? newRowTarget(tfiles, pr.root, pr.ns) : "";
 
   // ---- tree
   const nodes: TreeNode[] = [];
@@ -47,6 +94,8 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
     id: `src:${s.index}`, label: (s.kind ?? s.method).replace(/^thematic:/, ""), icon: "i-render",
     hint: s.from.length ? s.from.map((f) => (f.kind === "bone" ? f.bone : f.point)).join(", ") : s.fromRaw === undefined ? "eyes" : "?",
   })) });
+  if (beams.length) nodes.push({ id: "beam", label: "Beam", icon: "i-render", children: beams.map((b) => ({ id: `beam:${b.index}`, label: `beam look · line ${b.line}`, icon: "i-render" })) });
+  if (isJs) nodes.push({ id: "timing", label: "Timing", icon: "i-theme", hint: timeline.total === null ? undefined : `${Math.round(timeline.total * 100) / 100} s`, children: timeline.steps.filter((s) => s.kind === "phase").map((s) => ({ id: `phase:${s.name}`, label: s.name, icon: "i-entry", hint: s.seconds === null ? "?" : `${s.seconds} s` })) });
   if (con?.windows.length || con?.pages.length) {
     nodes.push({ id: "console", label: "Console", icon: "i-console", children: [
       { id: "theme", label: "Theme", icon: "i-theme" },
@@ -59,7 +108,9 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
   const select = (id: string | null) => {
     setSel(id);
     if (!id) return;
-    if (id === "renders" || id.startsWith("src:")) setTab("renders");
+    if (id === "beam" || id.startsWith("beam:")) setTab("beam");
+    else if (id === "timing" || id.startsWith("phase:")) setTab("timing");
+    else if (id === "renders" || id.startsWith("src:")) setTab("renders");
     else if (id === "wheel" || id.startsWith("entry:")) setTab("wheel");
     else if (id === "console" || id === "theme" || id.startsWith("win:") || id.startsWith("w:") || id.startsWith("page:")) {
       setTab("console");
@@ -70,14 +121,34 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
   };
 
   const setFrom = (index: number, v: unknown, live = false) => edit((cur) => setRenderFrom(cur, index, v), live);
+  const setOpt = (bi: number) => (key: string, v: unknown, live = false) => edit((cur) => setBeamOption(cur, bi, key, v), live);
+  const setSuit = (key: string, v: unknown) => {
+    if (!suitLayer || suitLayer.index < 0 || !pr) return;
+    cross("beam", suitLayer.path, (cur) => { const i = suitAbilityIndex(cur, pr.ns, name); return i < 0 ? null : setSuitBeam(cur, i, key, v); });
+  };
+  const timingEdits = {
+    setStat: (row: StatRow, col: StatCol, v: number) => cross("timing", row.path, (cur) => setStatCell(cur, name, col, v)),
+    setTune: (row: TuneRow, v: number) => cross("timing", row.path, (cur) => setTuneCell(cur, name, row.key, v, row.own ? "own" : "all")),
+    setLiteral: (phase: string, v: number) => edit((cur) => { const e = setLastsLiteral(cur, phase, v); return e ? applyEdits(cur, [e]) : cur; }),
+    addRow: () => { if (pr && target) cross("timing", target, (cur) => addTimingRow(cur, pr.ns, name)); },
+  };
   const setCon = (t: ConsoleTarget, v: Record<string, unknown>, live = false) => edit((cur) => setConsoleProps(cur, t, v), live);
 
   // ---- 3D markers: every anchor of every source
   const markers: Marker[] = sources.flatMap((s) => (s.from.length ? s.from : s.fromRaw === undefined ? [{ kind: "point", point: "eyes", offset: [0, 0, 0], relative: "facing" } as AnchorSpec] : []).map((spec, fi) => {
     const fr = anchorFrame(spec);
-    return { id: `src:${s.index}:${fi}`, pos: fr.origin, dir: fr.out, color: "#88c0d0", label: `${(s.kind ?? s.method).replace(/^thematic:/, "")} · ${spec.kind === "bone" ? spec.bone : spec.point}`, movable: s.fromRaw !== undefined };
+    const bv = s.kind === "thematic:beam" ? beams[beamIdxOfSource(s.index)] : undefined;
+    // a beam visual is drawn from its point along the look (forward), as wide and long as the layers say
+    const eff = bv ? effectiveBeam(bv.opts, suitLayer?.own, fromHands(bv.from)) : undefined;
+    const label = `${(s.kind ?? s.method).replace(/^thematic:/, "")} · ${spec.kind === "bone" ? spec.bone : spec.point}${eff && eff.scale.value !== 1 ? ` · x${eff.scale.value}` : ""}`;
+    return {
+      id: `src:${s.index}:${fi}`, pos: fr.origin, dir: eff ? ([0, 0, -1] as NumVec3) : fr.out, color: "#88c0d0", label, movable: s.fromRaw !== undefined,
+      beam: eff ? { length: eff.drawn.length * 16, width: Math.max(0.12, eff.drawn.radius * 16), glow: Math.max(0.3, eff.drawn.glow * 16), core: eff.coreColor.value, end: eff.glowColor.value, count: eff.count.value, spacing: eff.spacing.value * 16, fade: eff.drawn.cut, opacity: eff.opacity.value } : undefined,
+    };
   }));
   const selSrc = sel?.startsWith("src:") ? sources[Number(sel.split(":")[1])] : undefined;
+  const selBeam = sel === "beam" ? 0 : sel?.startsWith("beam:") ? Number(sel.slice(5)) : -1;
+  const selMarker = selBeam >= 0 ? (beamSrc[selBeam] === undefined ? null : `src:${beamSrc[selBeam]}:0`) : sel && sel.split(":").length === 2 ? sel + ":0" : sel;
 
   const onDrag = (mid: string, delta: NumVec3, phase: "move" | "end") => {
     const [, si, fi] = mid.split(":").map(Number);
@@ -96,23 +167,32 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
     <div className="pe-tabs-host">
       <div className="pe-tabs">
         <button className={tab === "renders" ? "on" : ""} onClick={() => setTab("renders")}>Renders</button>
+        {beams.length > 0 && <button className={tab === "beam" ? "on" : ""} onClick={() => select(selBeam >= 0 ? sel! : "beam:0")} data-testid="pe-tab-beam">Beam</button>}
+        {isJs && <button className={tab === "timing" ? "on" : ""} onClick={() => select("timing")} data-testid="pe-tab-timing">Timing</button>}
         {(con?.windows.length ?? 0) > 0 && <button className={tab === "console" ? "on" : ""} onClick={() => setTab("console")} data-testid="pe-tab-console">Console</button>}
         {con?.wheel && <button className={tab === "wheel" ? "on" : ""} onClick={() => setTab("wheel")}>Wheel</button>}
-        {tab === "renders" && (
+        {(tab === "renders" || tab === "beam") && (
           <label className="pe-pick">Preview on
             <input list="pe-suits" className="pe-in" value={preview} placeholder="(player)" onChange={(e) => { setPreview(e.target.value); try { localStorage.setItem("packeditor.previewSuit", e.target.value); } catch { /* per-viewer convenience */ } }} />
             <datalist id="pe-suits">{suits.slice(0, 2000).map((s) => <option key={s.id} value={s.id} />)}</datalist>
           </label>
         )}
       </div>
-      {tab === "renders" && <Viewport3D rig={model?.rig ?? PLAYER} texture={model?.texture ?? null} markers={markers} selected={sel && sel.split(":").length === 2 ? sel + ":0" : sel} onSelect={(m) => m && select(m.split(":").slice(0, 2).join(":"))} onDrag={onDrag} testId="pe-vp3" />}
+      {(tab === "renders" || tab === "beam") && <Viewport3D rig={model?.rig ?? PLAYER} texture={model?.texture ?? null} markers={markers} selected={selMarker} onSelect={(m) => m && select(m.split(":").slice(0, 2).join(":"))} onDrag={onDrag} testId="pe-vp3" />}
+      {tab === "timing" && <TimelineView tl={timeline} sel={sel} select={select} />}
       {tab === "console" && con && <ConsoleCanvas con={con} lang={lang} page={page ?? con.pages[0]?.id ?? null} setPage={setPage} sel={sel} select={select} setCon={setCon} />}
       {tab === "wheel" && con?.wheel && <WheelPreview con={con} lang={lang} sel={sel} select={select} />}
     </div>
   );
 
   const inspector = (() => {
-    if (selSrc) return <SourceInspector s={selSrc} setFrom={(v, l) => setFrom(selSrc.index, v, l)} />;
+    if (selSrc) return <SourceInspector s={selSrc} setFrom={(v, l) => setFrom(selSrc.index, v, l)} onBeam={beamIdxOfSource(selSrc.index) >= 0 ? () => select(`beam:${beamIdxOfSource(selSrc.index)}`) : undefined} />;
+    if (selBeam >= 0) {
+      const bv = beams[selBeam];
+      return bv ? <BeamInspector bv={bv} hands={fromHands(bv.from)} suit={suitLayer} suitText={suitEntry ? baseName(suitEntry.path) : null} setOpt={setOpt(selBeam)} setSuit={setSuit} status={xstatus.beam}
+        openSuit={() => suitEntry && void openFile({ host, path: suitEntry.path })} /> : <Empty title="No such beam" />;
+    }
+    if (sel === "timing" || sel?.startsWith("phase:")) return <TimingInspector name={name} ctx={ctx} stats={stats} timeline={timeline} previewId={preview} target={target} edits={timingEdits} status={xstatus.timing} sel={sel} />;
     if (!con) return sources.length ? <Empty title="Select a render" detail="Pick one in the tree or the view to move where it comes out." /> : <Empty title="This ability draws nothing from the body" />;
     if (sel === "theme" || sel === "console") return <ThemeInspector con={con} setCon={setCon} />;
     if (sel?.startsWith("page:")) {
@@ -148,7 +228,7 @@ export default function AbilityView({ host, path, text, edit }: ViewProps) {
     return <ThemeInspector con={con} setCon={setCon} />;
   })();
 
-  return <Docks id="ability" tree={<SceneTree nodes={nodes} selected={sel} onSelect={select} testId="pe-tree" />} view={view} inspector={inspector} bar={<NewAbilityLangNote host={host} path={path} />} />;
+  return <Docks id="ability" tree={<SceneTree nodes={nodes} selected={sel} onSelect={select} testId="pe-tree" />} view={view} inspector={inspector} bar={<><NewAbilityLangNote host={host} path={path} />{xstatus.err && <span className="pe-note warn" data-testid="pe-cross-error">{xstatus.err}</span>}</>} />;
 }
 
 const winNode = (w: ConsoleWindow, lang: Record<string, string>): TreeNode => ({
@@ -156,7 +236,7 @@ const winNode = (w: ConsoleWindow, lang: Record<string, string>): TreeNode => ({
   children: w.widgets.map((x) => ({ id: `w:${w.id}:${x.id}`, label: tr(lang, x.props.label) || x.id, icon: "i-widget", hint: x.kind })),
 });
 
-function SourceInspector({ s, setFrom }: { s: RenderSource; setFrom: (v: unknown, live?: boolean) => void }) {
+function SourceInspector({ s, setFrom, onBeam }: { s: RenderSource; setFrom: (v: unknown, live?: boolean) => void; onBeam?: () => void }) {
   const list = s.from.length ? s.from : [{ kind: "point", point: "eyes", offset: [0, 0, 0], relative: "facing" } as AnchorSpec];
   const write = (i: number, a: AnchorSpec, live = false) => {
     const v = anchorValue(a);
@@ -166,6 +246,7 @@ function SourceInspector({ s, setFrom }: { s: RenderSource; setFrom: (v: unknown
     <>
       <Section title={(s.kind ?? s.method).replace(/^thematic:/, "")}>
         <div className="pe-note">Line {s.line}. {s.fromRaw === undefined ? "No from: it leaves the eyes. Pick a point to set one." : ""}</div>
+        {onBeam && <div className="pe-btns"><button className="pe-btn" data-testid="pe-to-beam" onClick={onBeam}>Edit the beam's look</button></div>}
       </Section>
       {list.map((a, i) => (
         <Section key={i} title={list.length > 1 ? `From #${i + 1}` : "Comes out of"}>

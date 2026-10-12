@@ -76,6 +76,47 @@ const PALMS = w("data/thematic/flight_profiles/palms.json", `{
 }
 `);
 const CHILD = w("data/thematic/flight_profiles/child.json", `{ "parent": "thematic:repulsor" }\n`);
+// beam + timing fixtures (Thematic-shaped, synthetic): an ability with a beam visual and two phases, a defaults csv (CRLF, one row
+// for it), a tuning csv named after the suit, a suit that carries the ability with its own assets.beam, and an ability with no row
+const UNI = w("data/thematic/abilities/shared/test_unibeam.js", `// Test Unibeam: charge, then pour a beam from the chest
+component(component => {
+    component.cooldown();
+    component.visual("thematic:beam", { from: { point: "chest", offset: [0, 0, -0.384] }, when: { state: "firing" } });
+
+    component.press(press => {
+        press.then("charging");
+    });
+
+    component.phase("charging", charging => {
+        charging.lasts(tuned("charge"));
+        charging.then("firing");
+    });
+
+    component.phase("firing", firing => {
+        firing.lasts("duration");
+        firing.then("cooldown");
+    });
+});
+`);
+const NOROW = w("data/thematic/abilities/shared/test_norow.js", `// Test No Row
+component(component => {
+    component.cooldown();
+    component.press(press => press.then("burst"));
+    component.phase("burst", burst => {
+        burst.lasts(1.5);
+        burst.then("cooldown");
+    });
+});
+`);
+const DEFS = w("data/thematic/ability_defaults/test_pack.csv", ["ability_id,cooldown,duration,range,damage,amplifier,disabled", "thematic:test_other,5,5,5,5,-1,FALSE", "thematic:test_unibeam,12,2.5,32,7.2,-1,FALSE", ""].join("\r\n"));
+const TUNE = w("data/thematic/ability_defaults/tuning/beam_suit.csv", "ability,key,value\ntest_unibeam,charge,0.6\ntest_other,charge,4\n");
+const BSUIT = w("data/thematic/armors/heroes/beam_suit.json", `{
+  "tier": 5,
+  "abilities": [
+    { "identifier": "test_unibeam", "keybind": "key.thematic.ability_0", "assets": { "beam": { "endColor": "#00AAFF" } } }
+  ]
+}
+`);
 const HUD = w("data/thematic/huds/gun_default.js", `// The ammo counter
 hud(hud => {
     hud.text("{ammo} / {capacity}", {
@@ -595,6 +636,123 @@ try {
     const raced = await E(`return !!document.querySelector('[data-testid=pe-ab-create]')`);
     return { ok: /^\/\/ Blank One: /.test(content) && content.includes("component(component => {") && !dup.create && /already exists/.test(dup.problem ?? "") && !dup2.create && /already exists/.test(dup2.problem ?? "") && (await text()) === nt0, note: JSON.stringify({ content: content.slice(0, 60), dup, dup2, raced }) };
   });
+
+  // ---- ability: beam look and timing
+  const beamInfo = () => E(`const l = document.querySelector('.pe-lab[data-beam]'); return l ? JSON.parse(l.dataset.beam) : null`);
+  const layerOf = (testId) => E(`const r = document.querySelector('[data-testid=${testId}]'); return r?.closest('.pe-bf')?.querySelector('.pe-layer')?.dataset.layer ?? null`);
+  const segs = () => E(`return [...document.querySelectorAll('[data-testid=pe-timeline] .pe-tl-seg')].map((s) => [s.dataset.step, s.dataset.seconds, s.dataset.start].join(':'))`);
+  const status = (id) => E(`return document.querySelector('[data-testid=${id}]')?.dataset.via ?? null`);
+  const UNI0 = fs.readFileSync(UNI, "utf8"), BSUIT0 = fs.readFileSync(BSUIT, "utf8"), DEFS0 = fs.readFileSync(DEFS, "utf8"), TUNE0 = fs.readFileSync(TUNE, "utf8");
+  let base3d = null;
+  await check("B1 beam: the Beam node and tab; each setting says which layer wins; the beam is drawn in 3D", async () => {
+    await E(`localStorage.setItem('packeditor.previewSuit', 'beam_suit'); return 1`);
+    await open(UNI);
+    const l = await labels();
+    await node("Beam");
+    await E(`await __qa.waitFor(() => document.querySelector('.pe-lab[data-beam]'), 8000); return 1`);
+    base3d = await beamInfo();
+    const layers = { color: await layerOf("pe-beam-opt-color"), scale: await layerOf("pe-beam-opt-scale"), size: await layerOf("pe-beam-opt-size") };
+    const eff = await E(`return document.querySelector('[data-testid=pe-beam-eff]')?.textContent ?? ''`);
+    const tip = await E(`return document.querySelector('[data-testid=pe-beam-opt-scale] .pe-row-l')?.title ?? ''`);
+    return { ok: l.some((x) => x.startsWith("Beam")) && l.some((x) => x.startsWith("Timing | 15.1 s")) && layers.color === "suit" && layers.scale === "default" && layers.size === "default" && /layered, 80 blocks/.test(eff) && /whole third-person beam/.test(tip) && base3d?.n === 2 && base3d.fade === true, note: JSON.stringify({ layers, eff, base3d }) };
+  });
+  await check("B2 beam: scale writes the literal and changes the 3D beam; style and scale change its length; undo restores", async () => {
+    await setInput("pe-beam-opt-scale", 2.5);
+    const t1 = await text();
+    const a = await beamInfo();
+    await setInput("pe-beam-opt-style", "cylinder", "select");
+    await setInput("pe-beam-opt-scale", 0.5);
+    const t2 = await text();
+    const b = await beamInfo();
+    await undo(); await undo(); await undo();
+    const t3 = await text();
+    const lay = await layerOf("pe-beam-opt-scale");
+    const wrote = t1 === UNI0.replace(`when: { state: "firing" } });`, `when: { state: "firing" }, scale: 2.5 });`);
+    const grew = Math.abs(a.glow / base3d.glow - 2.5) < 0.01 && a.r > base3d.r; // x2.5 wider than the unscaled beam
+    const shorter = t2.includes(`style: "cylinder"`) && t2.includes("scale: 0.5") && Math.abs(b.len - 120) < 0.01 && b.fade === false; // 15 blocks x 0.5 = 7.5 blocks = 120 px, no fade
+    return { ok: wrote && grew && shorter && t3 === UNI0 && lay === "default", note: JSON.stringify({ wrote, grew, a, b, t2: t2.split("\n")[3], lay }) };
+  });
+  await check("B3 beam: emptying a field removes the key", async () => {
+    await setInput("pe-beam-opt-scale", 3);
+    const on = (await text()).includes("scale: 3");
+    await setInput("pe-beam-opt-scale", "");
+    const t = await text();
+    await undo(); await undo();
+    return { ok: on && t === UNI0 && (await text()) === UNI0, note: t.split("\n")[3] };
+  });
+  await check("B4 beam: the suit's assets.beam is editable; written to the suit JSON on disk (suit not open), only that key, undoable", async () => {
+    await setInput("pe-suit-beam-size", 0.05);
+    const j = JSON.parse(fs.readFileSync(BSUIT, "utf8"));
+    const raw = fs.readFileSync(BSUIT, "utf8");
+    const via = await status("pe-beam-status");
+    const lay = await layerOf("pe-beam-opt-size");
+    const g = await beamInfo();
+    const ok1 = JSON.stringify(j.abilities[0].assets.beam) === JSON.stringify({ endColor: "#00AAFF", size: 0.05 }) && raw.startsWith(`{\n  "tier": 5,\n  "abilities": [\n    { "identifier": "test_unibeam", "keybind": "key.thematic.ability_0", "assets": { "beam": { "endColor": "#00AAFF", `) && via === "disk" && lay === "suit" && Math.abs(g.glow - 0.3 * 16) < 0.01;
+    await click("pe-beam-undo");
+    const back = fs.readFileSync(BSUIT, "utf8");
+    return { ok: ok1 && back === BSUIT0, note: JSON.stringify({ via, lay, glow: g.glow, raw: raw.split("\n")[3] }) };
+  });
+  await check("B5 beam: with the suit open in a tab the edit goes into its buffer (unsaved, undoable there), not to disk", async () => {
+    await open(BSUIT);
+    await open(UNI);
+    await node("Beam");
+    await setInput("pe-suit-beam-glowSize", 0.5);
+    const via = await status("pe-beam-status");
+    const disk = fs.readFileSync(BSUIT, "utf8");
+    await open(BSUIT);
+    const buf = await text();
+    await undo();
+    const back = await text();
+    return { ok: via === "buffer" && disk === BSUIT0 && JSON.parse(buf).abilities[0].assets.beam.glowSize === 0.5 && back === BSUIT0, note: JSON.stringify({ via, buf: buf.split("\n")[3] }) };
+  });
+  await check("T1 timing: the timeline shows press, the phases in order and the cooldown with the right seconds", async () => {
+    await open(UNI);
+    await click("pe-tab-timing");
+    const s = await segs();
+    const total = await E(`return document.querySelector('[data-testid=pe-timeline-total]')?.textContent ?? ''`);
+    const l = await labels();
+    const tune = await E(`return document.querySelector('[data-testid=pe-tune-charge] input')?.value ?? null`);
+    const row = await E(`return ['cooldown', 'duration', 'range', 'damage'].map((c) => document.querySelector('[data-testid=pe-timing-' + c + '] input')?.value).join()`);
+    return { ok: s.join() === "charging:0.6:0,firing:2.5:0.6,cooldown:12:3.1" && /15\.1 s/.test(total) && l.includes("charging | 0.6 s") && tune === "0.6" && row === "12,2.5,32,7.2", note: JSON.stringify({ s, total, row }) };
+  });
+  await check("T2 timing: the duration edit changes only that csv cell (CRLF kept); the timeline follows; undo restores the bytes", async () => {
+    await setInput("pe-timing-duration", 3);
+    const now = fs.readFileSync(DEFS, "utf8");
+    const s = await segs();
+    const via = await status("pe-timing-status");
+    await click("pe-timing-undo");
+    const back = fs.readFileSync(DEFS, "utf8");
+    const s2 = await segs();
+    return { ok: now === DEFS0.replace("thematic:test_unibeam,12,2.5,", "thematic:test_unibeam,12,3,") && now.length === DEFS0.length - 2 && s.join() === "charging:0.6:0,firing:3:0.6,cooldown:12:3.6" && via === "disk" && back === DEFS0 && s2[1] === "firing:2.5:0.6", note: JSON.stringify({ s, via }) };
+  });
+  await check("T3 timing: a tuned key edit changes only its value cell; charging follows", async () => {
+    await setInput("pe-tune-charge", 0.9);
+    const now = fs.readFileSync(TUNE, "utf8");
+    const s = await segs();
+    await click("pe-timing-undo");
+    return { ok: now === TUNE0.replace("test_unibeam,charge,0.6", "test_unibeam,charge,0.9") && s[0] === "charging:0.9:0" && fs.readFileSync(TUNE, "utf8") === TUNE0, note: JSON.stringify(s) };
+  });
+  await check("T4 timing: a literal lasts(n) is edited in place in the script; undo restores", async () => {
+    await open(NOROW);
+    await click("pe-tab-timing");
+    const s0 = await segs();
+    await setInput("pe-phase-burst-secs", 2);
+    const t = await text();
+    const s1 = await segs();
+    await undo();
+    return { ok: t.includes("burst.lasts(2);") && !t.includes("1.5") && s0[0] === "burst:1.5:0" && s1[0] === "burst:2:0" && (await text()) === fs.readFileSync(NOROW, "utf8"), note: JSON.stringify({ s0, s1 }) };
+  });
+  await check("T5 timing: no csv row offers Add timing row; it appends a zero row to the pack's own csv, nothing else changes", async () => {
+    const offered = await E(`return !!document.querySelector('[data-testid=pe-timing-norow]') && !!document.querySelector('[data-testid=pe-timing-add]')`);
+    await click("pe-timing-add");
+    const now = fs.readFileSync(DEFS, "utf8");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-timing-cooldown]'), 8000); return 1`);
+    const cd = await E(`return document.querySelector('[data-testid=pe-timing-cooldown] input')?.value ?? null`);
+    const s = await segs();
+    await click("pe-timing-undo");
+    return { ok: offered && now === DEFS0 + "thematic:test_norow,0,0,-1,-1,-1,FALSE\r\n" && cd === "0" && s.join() === "burst:1.5:0,cooldown:0:1.5" && fs.readFileSync(DEFS, "utf8") === DEFS0, note: JSON.stringify({ now: now.slice(DEFS0.length), cd, s }) };
+  });
+  await E(`localStorage.setItem('packeditor.previewSuit', 'test_suit'); return 1`);
 
   // ---- nothing reached disk unsaved
   await check("Z1 designer edits stay in the editor until saved (files on disk untouched)", async () => {

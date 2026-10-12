@@ -277,7 +277,8 @@ export const within = (inner: Span, outer: Span) => inner.s >= outer.s && inner.
 export function callsOn(calls: JsCall[], fn: JsFn | undefined, param = 0): JsCall[] {
   if (!fn) return [];
   const name = fn.params[param];
-  return name ? calls.filter((c) => c.recv === name && within(c, fn.body)) : [];
+  // inclusive: an expression body (`p => p.then("x")`) is exactly one call
+  return name ? calls.filter((c) => c.recv === name && c.s >= fn.body.s && c.e <= fn.body.e) : [];
 }
 
 export const objArg = (c: JsCall): JsObj | undefined => c.args.find((a): a is JsObj => a.t === "obj");
