@@ -13,7 +13,7 @@ const sh = (c, cwd) => execSync(c, { cwd, stdio: "pipe", encoding: "utf8" });
 const repo = (name) => { const d = path.join(root, name); fs.mkdirSync(d); sh("git init -q -b main . && git -c user.email=q@q -c user.name=qa commit -q --allow-empty -m init", d); return d; };
 const tc = repo("Thematic-Collections");
 for (const w of ["spidey", "guide-tablet", "mc26", "storage"]) sh(`git worktree add -q -b ${w} ../Thematic-Collections-${w}`, tc);
-const kyf = repo("thematic-kyf"), heir = repo("HeirloomSite"), aceRepo = repo("Atelier");
+const kyf = repo("thematic-kyf"), heir = repo("HeirloomSite"), aceRepo = repo("Ace");
 fs.mkdirSync(path.join(root, "never-opened"));
 const wt = (w) => path.join(root, `Thematic-Collections-${w}`);
 
@@ -46,14 +46,14 @@ try {
   await check("no project open: Welcome with sidebar nav", () => app.ev(`return !!document.querySelector('.wl-side') && [...document.querySelectorAll('.wl-nav')].map(n => n.textContent).join() === 'Projects,Customize'`));
   await check("declutter: missing/temp/duplicate hidden, worktrees grouped, remote kept", async () => {
     const n = await names();
-    const want = ["Thematic-Collections(g)", "thematic-kyf", "HeirloomSite", "Atelier", "server-app"];
+    const want = ["Thematic-Collections(g)", "thematic-kyf", "HeirloomSite", "Ace", "server-app"];
     return { ok: JSON.stringify(n) === JSON.stringify(want), note: JSON.stringify(n) };
   });
   await check("group shows worktree count, collapsed by default", () => app.ev(`return document.querySelector('[data-count]').textContent === '4 worktrees'`));
   await check("remote row has host badge", () => app.ev(`return document.querySelector('.wl-row[data-name=server-app] .wl-host')?.textContent === 'mc'`));
-  await check("tiles: initials + colour", () => app.ev(`const t = [...document.querySelectorAll('.wl-row')].map(r => r.querySelector('.wl-tile').textContent); return { ok: t.join() === 'TC,TK,HS,At,SA', note: t.join() }`));
-  await check("paths abbreviated with ~", () => app.ev(`return document.querySelector('.wl-row[data-name=Atelier] .wl-path').textContent.startsWith('~/')`));
-  await check("branch shown for git project", () => app.ev(`return await __qa.waitFor(() => document.querySelector('.wl-row[data-name=Atelier] .wl-branch')?.textContent === 'main', 5000).then(() => true, () => false)`));
+  await check("tiles: initials + colour", () => app.ev(`const t = [...document.querySelectorAll('.wl-row')].map(r => r.querySelector('.wl-tile').textContent); return { ok: t.join() === 'TC,TK,HS,Ac,SA', note: t.join() }`));
+  await check("paths abbreviated with ~", () => app.ev(`return document.querySelector('.wl-row[data-name=Ace] .wl-path').textContent.startsWith('~/')`));
+  await check("branch shown for git project", () => app.ev(`return await __qa.waitFor(() => document.querySelector('.wl-row[data-name=Ace] .wl-branch')?.textContent === 'main', 5000).then(() => true, () => false)`));
 
   await check("expand group (Right arrow) lists worktrees", async () => {
     await key("ArrowRight"); await sleep(200);
@@ -64,7 +64,7 @@ try {
     await app.ev(`const i = document.querySelector('.wl-search input'); i.focus(); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; set.call(i, 'tcs'); i.dispatchEvent(new Event('input', {bubbles:true})); return 1`);
     await sleep(200);
     const n = await names();
-    return { ok: n[0] === "Thematic-Collections(g)" && n.includes("Thematic-Collections-storage(c)") && !n.includes("Atelier"), note: JSON.stringify(n) };
+    return { ok: n[0] === "Thematic-Collections(g)" && n.includes("Thematic-Collections-storage(c)") && !n.includes("Ace"), note: JSON.stringify(n) };
   });
   await app.ev(`const i = document.querySelector('.wl-search input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set; set.call(i, 'heir'); i.dispatchEvent(new Event('input', {bubbles:true})); return 1`);
   await sleep(200);
@@ -88,7 +88,7 @@ try {
     await app.ev(`document.querySelector('.wl-row[data-name=HeirloomSite]').dispatchEvent(new MouseEvent('mousedown',{bubbles:true})); return 1`);
     await sleep(100); await key("Backspace"); await sleep(250);
     const n = await names(), st = await stored();
-    return { ok: !n.includes("HeirloomSite") && !st.some((p) => p.includes("HeirloomSite")) && fs.existsSync(heir) && st.some((p) => p.includes("Atelier")), note: JSON.stringify(n) };
+    return { ok: !n.includes("HeirloomSite") && !st.some((p) => p.includes("HeirloomSite")) && fs.existsSync(heir) && st.some((p) => p.includes("Ace")), note: JSON.stringify(n) };
   });
   await check("hover x removes an entry", async () => {
     await app.ev(`document.querySelector('.wl-row[data-name=thematic-kyf] .wl-x').click(); return 1`); await sleep(250);
@@ -98,7 +98,7 @@ try {
     await app.ev(`setTimeout(() => location.reload(), 50); return 1`); await sleep(800);
     await until(() => app.ev("return !!window.__qa && !!document.querySelector('[data-testid=welcome-list]')"), 20000); await sleep(1000);
     const n = await names();
-    return { ok: !n.includes("HeirloomSite") && !n.includes("thematic-kyf") && n.includes("Atelier"), note: JSON.stringify(n) };
+    return { ok: !n.includes("HeirloomSite") && !n.includes("thematic-kyf") && n.includes("Ace"), note: JSON.stringify(n) };
   });
   await check("Customize page", async () => {
     await app.ev(`document.querySelector('[data-nav=customize]').click(); return 1`); await sleep(200);

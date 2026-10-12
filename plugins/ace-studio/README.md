@@ -15,14 +15,14 @@ Claude sessions launched from Ace (AI Sessions view, or `claude` typed in an Ace
 Nothing in `~/.claude` is changed unless you run these:
 
 ```sh
-claude plugin validate /Users/alexw/IdeaProjects/Atelier/plugins
-claude plugin marketplace add /Users/alexw/IdeaProjects/Atelier/plugins
+claude plugin validate /Users/alexw/IdeaProjects/Ace/plugins
+claude plugin marketplace add /Users/alexw/IdeaProjects/Ace/plugins
 claude plugin install ace-studio@ace-local
 # update after rebuilding the server:
 claude plugin update ace-studio@ace-local   # or /reload-plugins inside a session
 ```
 
-Try without installing: `claude --plugin-dir /Users/alexw/IdeaProjects/Atelier/plugins/ace-studio`.
+Try without installing: `claude --plugin-dir /Users/alexw/IdeaProjects/Ace/plugins/ace-studio`.
 
 Remove: `claude plugin uninstall ace-studio@ace-local && claude plugin marketplace remove ace-local`.
 
