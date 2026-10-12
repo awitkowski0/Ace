@@ -37,6 +37,9 @@ jobs:
 
       - name: Build installers (NSIS + MSI)
         run: pnpm tauri build
+        env:
+          # vite bundling Monaco + three.js overflows Node's default heap on the runner
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
