@@ -9,14 +9,21 @@ import { openFile } from "../../../editor/store";
 import type { NumVec3 } from "../../animstudio/core";
 import { anchorFrame, jetPosition, localToScene, type AnchorFrame } from "../core/anchors";
 import { packRoot, stem } from "../core/kinds";
-import { BEAM_DEFAULTS, BEAM_VISUALS, FLIGHT_TYPES, JET_GROUPS, KEYBINDS, beamOf, readRenderSources, readSuit, setJson, type BeamKey, type RenderSource, type Suit } from "../core/suit";
-import { abilityPath, flightIdOf, loadFlight, loadSuitModel, useAsync, type Flight } from "./data";
+import { scanCatalog, type Catalog } from "../core/catalog";
+import { BEAM_DEFAULTS, BEAM_VISUALS, beamOf, readAttributes, readRenderSources, readStats, readSuit, setJson, setTop, type BeamKey, type RenderSource, type Suit } from "../core/suit";
+import { abilityPath, flightIdOf, loadCatalog, loadFlight, loadSuitModel, useAsync, type Flight } from "./data";
+import { openFlightProfile } from "./flightData";
 import { Docks, ParseError, type ViewProps } from "./PackView";
-import { listData, readText, resourceRoots } from "./resolve";
+import { readText, resourceRoots } from "./resolve";
+import { AbilityList, AttributeTable, ChipSelect, ReadOnlyFields, StatTable } from "./suitLists";
 import { BoolField, ColorField, Empty, EnumField, NumberField, Section, SceneTree, TextField, Vec3Field, type TreeNode } from "./widgets";
 import { Viewport3D, type Marker } from "./Viewport3D";
 
 interface AbilityInfo { id: string; path: string | null; sources: RenderSource[] }
+type Edit = (fn: (cur: string) => string, live?: boolean) => void;
+
+/** Top-level keys the designer edits (the rest show read-only under "Other fields"). */
+const TOP_EDITED = ["tier", "wip", "boss", "priority", "parent", "suit-recipe", "type", "tags", "fighting_type", "flight_type", "flight_profile", "jet_groups", "abilities", "stats", "attributes"];
 
 const keyShort = (k?: string) => (k ? k.replace("key.thematic.", "").replace("ability_", "A") : "");
 const COLORS = ["#88c0d0", "#a3be8c", "#ebcb8b", "#b48ead", "#d08770", "#81a1c1", "#bf616a", "#8fbcbb"];
@@ -40,11 +47,12 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   }, [roots, abilityIds], [] as AbilityInfo[]);
   const flightId = flightIdOf(suit?.flightProfile, suit?.flightType);
   const [flight] = useAsync(() => (roots.length ? loadFlight(host, roots, flightId) : Promise.resolve(null as Flight | null)), [roots, flightId], null as Flight | null);
-  const [profiles] = useAsync(() => (roots.length && pr ? listData(host, roots, pr.ns, "flight_profiles", [".json"]) : Promise.resolve([])), [roots], [] as Array<{ id: string; path: string }>);
+  const [catalog] = useAsync(() => (roots.length && pr ? loadCatalog(host, roots, pr.ns) : Promise.resolve(null as Catalog | null)), [roots], null as Catalog | null);
   const [sel, setSel] = useState<string | null>("suit");
   const drag = useRef<{ index: number; base: NumVec3 } | null>(null);
 
   if (error || !suit) return <ParseError error={error} />;
+  const cat = catalog ?? scanCatalog([], pr?.ns ?? "thematic"); // values the docs name, until the project's files are read
 
   // ---- what renders from where
   const markers: Marker[] = [];
@@ -83,19 +91,22 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   const nodes: TreeNode[] = [{
     id: "suit", label: id, icon: "i-suit", hint: suit.tier !== undefined ? `tier ${suit.tier}` : undefined, children: [
       { id: "model", label: "Model", icon: "i-model", hint: model?.geoPath ? "" : "player" },
-      { id: "abilities", label: "Abilities", icon: "i-folder", children: suit.abilities.map((a, ai) => ({
+      { id: "abilities", label: "Abilities", icon: "i-folder", hint: suit.abilities.length ? String(suit.abilities.length) : undefined, children: suit.abilities.map((a, ai) => ({
         id: `ab:${ai}`, label: a.id, icon: "i-ability", hint: keyShort(a.keybind), dim: a.remove,
         children: infos.find((x) => x.id === a.id)?.sources.flatMap((s) => s.from.map((spec, fi) => ({
           id: `src:${ai}:${s.index}:${fi}`, label: `${(s.kind ?? s.method).replace(/^thematic:/, "")}`, icon: "i-render",
           hint: spec.kind === "bone" ? spec.bone : spec.point,
         }))) ?? [],
       })) },
+      { id: "stats", label: "Stats", icon: "i-text", hint: readStats(suit.raw).length ? String(readStats(suit.raw).length) : undefined },
       { id: "flight", label: "Flight", icon: "i-flight", hint: flightId.replace(/^thematic:/, ""), children: (flight?.jets ?? []).map((j) => ({ id: `jet:${j.index}`, label: j.anchor, icon: "i-jet", hint: j.when })) },
     ],
   }];
 
   const set = (p: Array<string | number>, v: unknown, live = false) => edit((cur) => setJson(cur, p, v), live);
-  const abIndex = sel?.startsWith("ab:") ? Number(sel.slice(3)) : sel?.startsWith("src:") ? Number(sel.split(":")[1]) : -1;
+  const abSel = sel?.startsWith("ab:") ? Number(sel.slice(3)) : sel?.startsWith("src:") ? Number(sel.split(":")[1]) : -1;
+  const abIndex = abSel < suit.abilities.length ? abSel : -1;
+  const openProfile = () => void openFlightProfile(host, path, flightId);
 
   const onDrag = (mid: string, delta: NumVec3, phase: "move" | "end") => {
     const [, ai] = mid.split(":").map(Number);
@@ -113,7 +124,14 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   };
 
   const inspector = (() => {
-    if (sel === "suit") return <SuitInspector suit={suit} set={set} profiles={profiles.map((p) => `${pr?.ns ?? "thematic"}:${p.id}`)} />;
+    if (sel === "suit") return <SuitInspector suit={suit} cat={cat} edit={edit} openProfile={openProfile} />;
+    if (sel === "abilities" && abIndex < 0) return <AbilitiesPanel suit={suit} catalog={catalog} selected={null} edit={edit} onSelect={setSel} />;
+    if (sel === "stats") return (
+      <>
+        <Section title="Stats"><StatTable rows={readStats(suit.raw)} catalog={catalog} edit={edit} /></Section>
+        <Section title="Scales"><AttributeTable rows={readAttributes(suit.raw)} catalog={catalog} edit={edit} /></Section>
+      </>
+    );
     if (sel === "model") return (
       <Section title="Model">
         <div className="pe-note">{model?.geoPath ? model.geoPath.split("/").slice(-4).join("/") : `No geo/armor/${id}.geo.json: showing the plain player.`}</div>
@@ -127,7 +145,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
       const j = sel.startsWith("jet:") ? flight?.jets[Number(sel.slice(4))] : undefined;
       return (
         <>
-          <SuitFlight suit={suit} set={set} profiles={profiles.map((p) => `${pr?.ns ?? "thematic"}:${p.id}`)} />
+          <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} />
           <Section title={j ? `Jet · ${j.anchor}` : "Jets"}>
             <div className="pe-note">{flight?.path ? <>Jets come from <b>{flightId}</b>{flight.jets[0] && flight.jets[0].from !== flight.path ? " (inherited)" : ""}: every suit on that profile shares them.</> : `No flight profile ${flightId}.`}</div>
             {j && <div className="pe-kv"><span>when</span><b>{j.when ?? "fast"}</b><span>aim</span><b>{j.aim ?? "down"}</b></div>}
@@ -142,8 +160,8 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
       const srcSel = sel?.startsWith("src:") ? info?.sources[Number(sel.split(":")[2])] : undefined;
       return (
         <>
+          <AbilitiesPanel suit={suit} catalog={catalog} selected={abIndex} edit={edit} onSelect={setSel} />
           <Section title={a.id}>
-            <EnumField label="Key" value={a.keybind} options={KEYBINDS} allowEmpty="(none)" labels={(k) => k.replace("key.thematic.", "")} onChange={(v) => set(["abilities", abIndex, "keybind"], v)} testId="pe-keybind" />
             {info?.path && <div className="pe-btns"><button className="pe-btn" onClick={() => void openFile({ host, path: info.path! })}>Open ability</button></div>}
             {srcSel && (
               <div className="pe-note">
@@ -169,24 +187,46 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   );
 }
 
-function SuitInspector({ suit, set, profiles }: { suit: Suit; set: (p: Array<string | number>, v: unknown, live?: boolean) => void; profiles: string[] }) {
+function AbilitiesPanel({ suit, catalog, selected, edit, onSelect }: { suit: Suit; catalog: Catalog | null; selected: number | null; edit: Edit; onSelect: (sel: string | null) => void }) {
+  return (
+    <Section title="Abilities">
+      <AbilityList abilities={suit.abilities} catalog={catalog} selected={selected} edit={edit} onSelect={(i) => onSelect(i === null ? "abilities" : `ab:${i}`)} />
+    </Section>
+  );
+}
+
+function SuitInspector({ suit, cat, edit, openProfile }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void }) {
+  const top = (key: string) => (v: unknown, live?: boolean) => edit((cur) => setTop(cur, key, v), live);
+  const readOnly = Object.entries(suit.raw).filter(([k]) => !TOP_EDITED.includes(k));
   return (
     <>
       <Section title="Suit">
-        <NumberField label="Tier" value={suit.tier} step={1} min={1} max={10} onChange={(v, l) => set(["tier"], v, l)} testId="pe-tier" doc="Power tier, 1 to 10" />
-        <BoolField label="Work in progress" value={suit.wip} dflt={true} onChange={(v) => set(["wip"], v)} doc="A WIP tooltip; the suit bench doesn't offer it" />
+        <NumberField label="Tier" value={suit.tier} step={1} min={1} max={10} onChange={(v, l) => top("tier")(v, l)} testId="pe-tier" doc="Power tier, 1 to 10" />
+        <BoolField label="Work in progress" value={suit.wip} dflt={true} onChange={(v) => top("wip")(v)} doc="A WIP tooltip; the suit bench doesn't offer it" />
+        <ChipSelect label="Fighting" options={cat.fightingTypes} value={suit.fightingType} onChange={(v) => top("fighting_type")(v)} testId="pe-fighting" doc="Fighting types: the suit's playstyle" />
+        <ChipSelect label="Tags" options={cat.tags} value={suit.tags} onChange={(v) => top("tags")(v)} testId="pe-tags" doc="Each tag gives the suit what that tag file gives, or is a plain flag read by code" />
+        <EnumField label="Type" value={suit.type} options={cat.types} allowEmpty="(plain suit)" onChange={(v) => top("type")(v)} doc="thematic:ladder is a suit that grows with levels" />
+        <NumberField label="Priority" value={suit.priority} step={1} onChange={(v) => top("priority")(v)} doc="Orders the suit where a list sorts by priority" />
+        <BoolField label="Boss" value={suit.boss} dflt={false} onChange={(v) => top("boss")(v)} doc="Internal: a boss's suit. Leave it off." />
+        <TextField label="Parent" value={suit.parent} mono placeholder="(none)" onChange={(v) => top("parent")(v.trim() || undefined)} doc="Makes this suit an alt (skin variant) of that suit" />
+        <TextField label="Suit recipe" value={suit.suitRecipe} mono placeholder="(none)" onChange={(v) => top("suit-recipe")(v.trim() || undefined)} doc="The suit bench recipe, thematic:<recipe file name>" />
       </Section>
-      <SuitFlight suit={suit} set={set} profiles={profiles} />
+      <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} />
+      <Section title="Other fields" open={false}>
+        <ReadOnlyFields fields={readOnly} />
+      </Section>
     </>
   );
 }
 
-function SuitFlight({ suit, set, profiles }: { suit: Suit; set: (p: Array<string | number>, v: unknown, live?: boolean) => void; profiles: string[] }) {
+function SuitFlight({ suit, cat, edit, openProfile }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void }) {
+  const top = (key: string) => (v: unknown) => edit((cur) => setTop(cur, key, v));
   return (
     <Section title="Flight">
-      <EnumField label="Flight type" value={suit.flightType} options={FLIGHT_TYPES} allowEmpty="(default: NO_HANDS)" onChange={(v) => set(["flight_type"], v)} />
-      <EnumField label="Profile" value={suit.flightProfile} options={profiles} allowEmpty="(from flight type)" onChange={(v) => set(["flight_profile"], v)} testId="pe-flight-profile" />
-      <EnumField label="Jet limbs" value={suit.jetGroups} options={JET_GROUPS} allowEmpty="(all jets)" onChange={(v) => set(["jet_groups"], v)} />
+      <EnumField label="Flight type" value={suit.flightType} options={cat.flightTypes} allowEmpty="(default: NO_HANDS)" onChange={(v) => top("flight_type")(v)} />
+      <EnumField label="Profile" value={suit.flightProfile} options={cat.flightProfiles} allowEmpty="(from flight type)" onChange={(v) => top("flight_profile")(v)} testId="pe-flight-profile" />
+      <div className="pe-btns"><button className="pe-btn" data-testid="pe-edit-profile" onClick={openProfile}>Edit flight profile →</button></div>
+      <EnumField label="Jet limbs" value={suit.jetGroups} options={cat.jetGroups} allowEmpty="(all jets)" onChange={(v) => top("jet_groups")(v)} />
     </Section>
   );
 }

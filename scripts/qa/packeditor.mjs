@@ -44,7 +44,6 @@ component(component => {
     component.hold(hold => hold.then("firing"));
 });
 `);
-w("data/thematic/flight_profiles/jetpack.json", `{ "effects": { "jets": [] } }\n`);
 w("data/thematic/flight_profiles/repulsor.json", `{
   "parent": "thematic:jetpack",
   "effects": {
@@ -55,6 +54,18 @@ w("data/thematic/flight_profiles/repulsor.json", `{
   }
 }
 `);
+w("data/thematic/flight_profiles/jetpack.json", `{ "poses": { "style": "propelled", "armBack": 20 }, "effects": { "jets": [] } }\n`);
+const PALMS = w("data/thematic/flight_profiles/palms.json", `{
+  "parent": "thematic:jetpack",
+  "effects": {
+    "jets": [
+      { "anchor": "rightPalm", "aim": "palm", "when": "always", "flame": { "core": "#FFFFFF", "outer": "#64E9FF", "length": 0.9, "width": 0.12 } },
+      { "anchor": "leftPalm", "aim": "palm", "when": "always", "flame": { "core": "#FFFFFF", "outer": "#64E9FF", "length": 0.9, "width": 0.12 } }
+    ]
+  }
+}
+`);
+const CHILD = w("data/thematic/flight_profiles/child.json", `{ "parent": "thematic:repulsor" }\n`);
 const HUD = w("data/thematic/huds/gun_default.js", `// The ammo counter
 hud(hud => {
     hud.text("{ammo} / {capacity}", {
@@ -98,7 +109,7 @@ const GUIDE = w("assets/thematic/guide/thematic/en_us/entries/suits/test_suit.js
   ]
 }
 `);
-const before = Object.fromEntries([SUIT, HUD, HIVE, GUIDE].map((f) => [f, fs.readFileSync(f, "utf8")]));
+const before = Object.fromEntries([SUIT, HUD, HIVE, GUIDE, PALMS, CHILD].map((f) => [f, fs.readFileSync(f, "utf8")]));
 
 const app = await launch(proj);
 const rows = [];
@@ -223,6 +234,175 @@ try {
     await E(`[...document.querySelectorAll('[data-testid=pe-inspector] .pe-btn')].find((b) => b.textContent === '+ Page after').click(); await __qa.sleep(300); return 1`);
     const j = JSON.parse(await text());
     return { ok: j.pages[1].type === "suit_abilities" && j.pages.length === 3 && j.pages[2].type === "text", note: JSON.stringify(j.pages.map((p) => p.type)) };
+  });
+
+  // ---- flight designer
+  const vecSet = (testId, idx, v) => E(`const r = document.querySelector('[data-testid=${testId}]'); const el = r.querySelectorAll('input')[${idx}]; el.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(el, ${JSON.stringify(String(v))}); el.dispatchEvent(new Event('input', { bubbles: true })); el.blur(); await __qa.sleep(250); return 1`);
+  const click = (testId) => E(`const b = document.querySelector('[data-testid=${testId}]'); if (!b) throw new Error('no ${testId}'); b.click(); await __qa.sleep(250); return 1`);
+  await check("F1 flight: jet offset is added on edit, removed on reset; one undo restores the file", async () => {
+    await E(`localStorage.setItem('packeditor.previewSuit', 'test_suit'); return 1`);
+    await open(PALMS);
+    await node("rightPalm");
+    await vecSet("pe-jet-offset", 1, -2);
+    const t = await text();
+    const ok1 = JSON.parse(t).effects.jets[0].offset?.join() === "0,-2,0" && t.includes(`"offset": [0, -2, 0]`) && !JSON.parse(t).effects.jets[1].offset;
+    await click("pe-jet-offset-reset");
+    const t2 = await text();
+    await vecSet("pe-jet-offset", 2, 3);
+    await undo();
+    const t3 = await text();
+    return { ok: ok1 && t2 === before[PALMS] && t3 === before[PALMS], note: t.split("\n").find((x) => x.includes("offset")) };
+  });
+  await check("F2: jet angle is written as [pitch, yaw, roll] and removed on reset", async () => {
+    await vecSet("pe-jet-angle", 0, 25);
+    await vecSet("pe-jet-angle", 2, -10);
+    const t = await text();
+    const a = JSON.parse(t).effects.jets[0].angle;
+    await click("pe-jet-angle-reset");
+    const t2 = await text();
+    return { ok: a?.join() === "25,0,-10" && t2 === before[PALMS], note: JSON.stringify(a) };
+  });
+  await check("F2b: nozzle glow toggle writes glow 0, and back on restores 0.45", async () => {
+    await E(`document.querySelector('[data-testid=pe-glow-toggle] input').click(); await __qa.sleep(250); return 1`);
+    const off = JSON.parse(await text()).effects.jets[0].flame.glow;
+    const hidden = await E(`return !document.querySelector('[data-testid=pe-glow]')`);
+    await E(`document.querySelector('[data-testid=pe-glow-toggle] input').click(); await __qa.sleep(250); return 1`);
+    const on = JSON.parse(await text()).effects.jets[0].flame.glow;
+    await undo(); await undo();
+    return { ok: off === 0 && hidden && on === 0.45 && (await text()) === before[PALMS], note: `off=${off} on=${on}` };
+  });
+  await check("F3: pose sliders show the inherited value and write / remove only their key", async () => {
+    await node("palms");
+    const shown = await E(`return document.querySelector('[data-testid=pe-pose-armBack] input.pe-range-n').value + '/' + document.querySelector('[data-testid=pe-pose-armOut] input.pe-range-n').value`);
+    await vecSet("pe-pose-armOut", 1, 35);
+    const t = await text();
+    const j = JSON.parse(t);
+    await click("pe-pose-reset-armOut");
+    const t2 = await text();
+    return { ok: shown === "20/2" && j.poses.armOut === 35 && t2 === before[PALMS], note: shown + " " + JSON.stringify(j.poses) };
+  });
+  await check("F4: inherited jets are read-only; Override copies the parent's whole list in", async () => {
+    await open(CHILD);
+    await node("rightFoot");
+    const ro = await E(`return !!document.querySelector('[data-testid=pe-jet-inherited]') && !document.querySelector('[data-testid=pe-jet-offset]')`);
+    await click("pe-jet-override");
+    const j = JSON.parse(await text());
+    return { ok: ro && j.parent === "thematic:repulsor" && j.effects.jets.length === 2 && j.effects.jets[0].anchor === "rightFoot", note: JSON.stringify(j).slice(0, 120) };
+  });
+  await open(PALMS);
+  await node("palms");
+  await vecSet("pe-pose-armOut", 1, 30);
+  await node("leftPalm");
+  await vecSet("pe-jet-offset", 1, -3);
+  await vecSet("pe-jet-angle", 0, 30);
+  await E(`const s = document.querySelector('[data-testid=pe-speed]'); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(s, '0.5'); s.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(500); return 1`);
+  app.shot("flightdesigner");
+  await undo(); await undo(); await undo();
+
+  // ---- suit lists: abilities (picker, keybind, reorder, remove), stats, attributes, chips (the Suit Designer)
+  await open(SUIT); // the flight section above leaves a flight profile open
+  const setSelect = (sel, value) => E(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('no ' + ${JSON.stringify(sel)}); el.focus(); const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value'); d.set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('change', { bubbles: true })); await __qa.sleep(250); return 1`);
+  const setVal = (sel, value) => E(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('no ' + ${JSON.stringify(sel)}); el.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(el, ${JSON.stringify(String(value))}); el.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(30); el.blur(); await __qa.sleep(250); return 1`);
+  const clickSel = (sel) => E(`const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('no ' + ${JSON.stringify(sel)}); el.click(); await __qa.sleep(250); return 1`);
+  const clickText = (sel, text) => E(`const el = [...document.querySelectorAll(${JSON.stringify(sel)})].find((b) => b.textContent === ${JSON.stringify(text)}); if (!el) throw new Error('no ${text} in ${sel}'); el.click(); await __qa.sleep(250); return 1`);
+  const pickAbility = (q, id) => E(`const i = document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add]'); i.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(i, ${JSON.stringify(q)}); i.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(200);
+    await __qa.waitFor(() => document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-results] [data-id=${id}]'), 15000); document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-results] [data-id=${id}]').click(); await __qa.sleep(300); return 1`);
+  const rowsOf = () => E(`return [...document.querySelectorAll('[data-testid=pack-editor] [data-testid=pe-ab-row]')].map((r) => r.querySelector('.mono').textContent + ' ' + r.querySelector('select').value + (r.querySelector('.pe-warn') ? ' !' : ''))`);
+
+  await check("S1 suit: Abilities lists the suit's abilities (keybind, missing flagged) with an add picker", async () => {
+    await node("test_suit");
+    await node("Abilities");
+    const rows = await rowsOf();
+    const picker = await E(`return !!document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add]')`);
+    return { ok: picker && rows.length === 2 && rows[0] === "hand_beam key.thematic.ability_0" && rows[1].startsWith("flight key.thematic.passive"), note: JSON.stringify(rows) };
+  });
+  let s2before;
+  await check("S2 ability: picking one from the project writes { identifier, keybind } at the end", async () => {
+    s2before = await text();
+    await pickAbility("hive", "hive_control");
+    const t1 = await text();
+    const j = JSON.parse(t1);
+    const last = j.abilities[j.abilities.length - 1];
+    return { ok: j.abilities.length === 3 && last.identifier === "hive_control" && last.keybind === "key.thematic.ability_0" && t1.split("\n").filter((x) => x.includes("hive_control")).length === 1, note: JSON.stringify(last) };
+  });
+  await check("S3 ability: the keybind dropdown rewrites that ability's keybind; undo puts it back", async () => {
+    const t0 = await text();
+    await setSelect(`[data-testid=pack-editor] [data-testid=pe-ab-row][data-ab="2"] [data-testid=pe-ab-kb]`, "key.thematic.utility");
+    const t1 = await text();
+    await undo();
+    const t2 = await text();
+    const j = JSON.parse(t1);
+    return { ok: j.abilities[2].keybind === "key.thematic.utility" && j.abilities[0].keybind === "key.thematic.ability_0" && t2 === t0, note: JSON.stringify(j.abilities[2]) };
+  });
+  await check("S4 ability: a row moves up; the others keep their order and bytes", async () => {
+    const t0 = await text();
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-ab-row][data-ab="2"] [data-testid=pe-ab-up]`);
+    const j = JSON.parse(await text());
+    const order = j.abilities.map((a) => a.identifier);
+    await undo();
+    return { ok: order.join() === "hand_beam,hive_control,flight" && (await text()) === t0, note: order.join(",") };
+  });
+  await check("S5 ability: remove (x) takes the row out; undo brings it back", async () => {
+    const t0 = await text();
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-ab-row][data-ab="2"] [data-testid=pe-ab-remove]`);
+    const t1 = await text();
+    await undo();
+    const t2 = await text();
+    return { ok: !JSON.parse(t1).abilities.some((a) => a.identifier === "hive_control") && JSON.parse(t1).abilities.length === 2 && t2 === t0 && t1 !== t0, note: JSON.stringify(JSON.parse(t1).abilities.map((a) => a.identifier)) };
+  });
+  await check("S6 ability: an id the project doesn't have is added anyway, flagged in the list", async () => {
+    const t0 = await text();
+    await E(`const i = document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add]'); i.focus(); const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); d.set.call(i, 'nope_thing'); i.dispatchEvent(new Event('input', { bubbles: true })); await __qa.sleep(200);
+      await __qa.waitFor(() => document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add-typed]'), 15000); document.querySelector('[data-testid=pack-editor] [data-testid=pe-ab-add-typed]').click(); await __qa.sleep(300); return 1`);
+    const t1 = await text();
+    const flagged = await E(`return [...document.querySelectorAll('[data-testid=pack-editor] [data-testid=pe-ab-row]')].at(-1).querySelector('.pe-warn')?.textContent ?? null`);
+    await undo();
+    return { ok: JSON.parse(t1).abilities.at(-1).identifier === "nope_thing" && flagged === "not in project" && (await text()) === t0, note: String(flagged) };
+  });
+  await check("S7 stats: add one from the known ids (min 0, max 100); undo removes it", async () => {
+    await node("Stats");
+    const t0 = await text();
+    await setSelect(`[data-testid=pack-editor] [data-testid=pe-stat-add]`, "thematic:base_defense");
+    const t1 = await text();
+    const st = JSON.parse(t1).stats;
+    await undo();
+    const back = (await text()) === t0;
+    return { ok: st.length === 1 && st[0].identifier === "thematic:base_defense" && st[0].minimum === 0 && st[0].maximum === 100 && back, note: JSON.stringify(st) };
+  });
+  await check("S8 stats: min/max edit writes the number; min above max is flagged; undo steps back", async () => {
+    await setSelect(`[data-testid=pack-editor] [data-testid=pe-stat-add]`, "thematic:base_defense");
+    const t0 = await text();
+    await setVal(`[data-testid=pack-editor] [data-stat="0"] [data-testid=pe-stat-min]`, "10");
+    const a = JSON.parse(await text()).stats[0];
+    await setVal(`[data-testid=pack-editor] [data-stat="0"] [data-testid=pe-stat-max]`, "5");
+    const flagged = await E(`return !!document.querySelector('[data-testid=pack-editor] [data-testid=pe-stat-row].bad')`);
+    const b = JSON.parse(await text()).stats[0];
+    await undo();
+    const mid = JSON.parse(await text()).stats[0];
+    await undo();
+    const back = (await text()) === t0;
+    return { ok: a.minimum === 10 && b.maximum === 5 && flagged && mid.maximum === 100 && back, note: JSON.stringify(b) };
+  });
+  await check("S9 attributes: add a scale from the docs' ids (effect 1); undo removes it", async () => {
+    await node("Stats");
+    const t0 = await text();
+    await setSelect(`[data-testid=pack-editor] [data-testid=pe-attr-add]`, "pehkui:base");
+    const att = JSON.parse(await text()).attributes;
+    await undo();
+    return { ok: att.length === 1 && att[0].identifier === "pehkui:base" && att[0].effect === 1 && (await text()) === t0, note: JSON.stringify(att) };
+  });
+  await check("S10 suit: fighting type chips, tier, flight profile link; each undoes", async () => {
+    await node("test_suit");
+    const t0 = await text();
+    await clickText(`[data-testid=pack-editor] [data-testid=pe-fighting] .pe-chip`, "DUELIST");
+    const f = JSON.parse(await text()).fighting_type;
+    await undo();
+    const f2 = (await text()) === t0;
+    await setVal(`[data-testid=pack-editor] [data-testid=pe-tier] input`, "9");
+    const tier = JSON.parse(await text()).tier;
+    await undo();
+    const link = await E(`return !!document.querySelector('[data-testid=pack-editor] [data-testid=pe-edit-profile]')`);
+    return { ok: f.join() === "DUELIST" && f2 && tier === 9 && (await text()) === t0 && link, note: JSON.stringify({ f, tier }) };
   });
 
   // ---- nothing reached disk unsaved

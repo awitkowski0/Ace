@@ -1,0 +1,64 @@
+/* The suit designer's lists: abilities, stats and scales, chips. Colours come from the editor's tokens (pack.css). */
+.pe-lst { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px; }
+
+.pe-lrow { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 6px; border-radius: 5px; border: 1px solid transparent; cursor: default; }
+.pe-lrow:hover { background: var(--bg-hover); }
+.pe-lrow.sel { border-color: var(--accent); background: var(--accent-bg); }
+.pe-lrow.dim .pe-lrow-id { color: var(--fg-dim); }
+.pe-lrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pe-lrow-id { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.pe-lrow-id .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-lrow-sub { font-size: 11px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-lrow-kb { width: 118px; flex: none; }
+.pe-lrow-btns { display: flex; gap: 2px; flex: none; }
+
+.pe-ib { width: 22px; height: 22px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: var(--fg-dim); font-size: 12px; line-height: 1; padding: 0; }
+.pe-ib:hover:not(:disabled) { background: var(--bg-input); border-color: var(--border); color: var(--fg); }
+.pe-ib:disabled { opacity: .3; }
+.pe-ib.danger:hover:not(:disabled) { color: #e5484d; }
+
+.pe-warn { flex: none; font-size: 10px; padding: 0 5px; border-radius: 3px; color: #f5a524; border: 1px solid currentColor; line-height: 14px; }
+.pe-tag { flex: none; font-size: 10px; color: var(--fg-faint); }
+
+/* the add picker */
+.pe-picker { position: relative; padding-top: 4px; }
+.pe-picker-in { height: 26px; }
+.pe-pick-list { display: flex; flex-direction: column; max-height: 260px; overflow: auto; margin-top: 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-chrome); }
+.pe-pick-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id folder" "desc desc"; gap: 0 8px; align-items: baseline; text-align: left; padding: 5px 8px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--fg); font: inherit; font-size: 12px; }
+.pe-pick-row:last-child { border-bottom: 0; }
+.pe-pick-row:hover:not(:disabled) { background: var(--bg-hover); }
+.pe-pick-row:disabled { opacity: .45; }
+.pe-pick-row.warn .pe-pick-id { color: #f5a524; }
+.pe-pick-id { grid-area: id; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-pick-folder { grid-area: folder; font-size: 11px; color: var(--fg-faint); }
+.pe-pick-desc { grid-area: desc; font-size: 11px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-pick-on { grid-area: folder; font-size: 10px; color: var(--fg-faint); }
+
+/* stats and scales */
+.pe-tbl-head, .pe-srow { display: grid; grid-template-columns: minmax(0, 1fr) 64px 64px 22px; gap: 6px; align-items: center; }
+.pe-srow.attr { grid-template-columns: minmax(0, 1fr) 64px 0px 22px; }
+.pe-tbl-head { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-faint); padding: 0 2px; }
+.pe-tbl-head .r { text-align: right; }
+.pe-srow { padding: 3px 2px; border-radius: 4px; }
+.pe-srow:hover { background: var(--bg-hover); }
+.pe-srow.bad { box-shadow: inset 2px 0 0 #e5484d; }
+.pe-srow-id { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pe-srow-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-srow.bad .pe-srow-name { color: #e5484d; }
+.pe-cell { text-align: right; }
+.pe-cell:focus { border-color: var(--accent); }
+.pe-range { position: relative; height: 4px; border-radius: 2px; background: var(--bg-input); border: 1px solid var(--border); }
+.pe-range-fill { position: absolute; top: -1px; bottom: -1px; border-radius: 2px; background: var(--accent); opacity: .85; }
+.pe-srow.bad .pe-range-fill { background: #e5484d; }
+.pe-add-sel { margin-top: 4px; width: 100%; height: 24px; }
+.pe-note.warn { color: #f5a524; }
+
+/* chips for the values a suit can take */
+.pe-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pe-chip { height: 20px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-input); color: var(--fg-dim); font: inherit; font-size: 11px; }
+.pe-chip:hover { color: var(--fg); }
+.pe-chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--fg); }
+
+/* read-only fields */
+.pe-ro { grid-template-columns: auto minmax(0, 1fr); }
+.pe-ro b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }

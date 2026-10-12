@@ -138,3 +138,12 @@ export function jetPosition(a: string): NumVec3 | null {
   if (!o) return null;
   return [-o[0] * PX, o[1] * REFERENCE_HEIGHT * PX, -o[2] * PX];
 }
+
+/**
+ * A jet anchor's frame in the scene: where it sits on the 1.8 block wearer, with the body's own axes (the game hangs jets off
+ * the body frame, not the arm bones: FlightJets.anchor). `jetFrame` (flight.ts) adds the jet's offset and angle to it.
+ */
+export function jetAnchorFrame(a: string): { origin: NumVec3; x: NumVec3; y: NumVec3; z: NumVec3 } | null {
+  const origin = jetPosition(a);
+  return origin ? { origin, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } : null;
+}

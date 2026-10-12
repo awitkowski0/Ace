@@ -65,14 +65,14 @@ export function Docks({ id, tree, view, inspector, bar }: { id: string; tree: Re
     <>
       {bar && <div className="pe-bar">{bar}</div>}
       <PanelGroup direction="horizontal" autoSaveId={`packeditor.${id}`} className="pe-docks">
-        <Panel id="tree" order={1} defaultSize={20} minSize={12} maxSize={40} className="pe-dock">
+        <Panel id="tree" order={1} defaultSize={22} minSize={14} maxSize={40} className="pe-dock">
           <div className="pe-dock-h">Scene</div>
           <div className="pe-dock-b">{tree}</div>
         </Panel>
         <PanelResizeHandle className="pe-handle" />
         <Panel id="view" order={2} minSize={30} className="pe-dock pe-center">{view}</Panel>
         <PanelResizeHandle className="pe-handle" />
-        <Panel id="insp" order={3} defaultSize={26} minSize={16} maxSize={45} className="pe-dock">
+        <Panel id="insp" order={3} defaultSize={30} minSize={20} maxSize={45} className="pe-dock">
           <div className="pe-dock-h">Inspector</div>
           <div className="pe-dock-b pe-insp" data-testid="pe-inspector">{inspector}</div>
         </Panel>

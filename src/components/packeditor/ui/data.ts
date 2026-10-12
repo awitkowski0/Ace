@@ -4,6 +4,8 @@ import { parseDoc } from "../../animstudio/core";
 import { playerRigModel, rigFromGeo, type RigModel } from "../../animstudio/ui/model";
 import { loadImage } from "../../animstudio/ui/resolve";
 import { abilityName, nsOf } from "../core/suit";
+import { scanCatalog, type Catalog, type SourceFile } from "../core/catalog";
+import { fs, type Location } from "../../../lib/ipc";
 import { findByName, findInRoots, readText } from "./resolve";
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], initial: T): [T, boolean] {
@@ -77,3 +79,68 @@ export async function loadFlight(host: string, roots: string[], id: string): Pro
 /** `flight_type` shorthand -> the shipped profile of that name. */
 export const flightIdOf = (profile: string | undefined, type: string | undefined) =>
   profile ?? (type ? "thematic:" + type.toLowerCase() : "thematic:no_hands");
+
+// ---------------------------------------------------------------- the project's catalog (what a suit can name)
+
+const at = (host: string, path: string): Location => ({ host, path });
+const SKIP_DIRS = new Set(["test", "tests", "build", "out", "run", "runs", "bin", "generated", "node_modules", "testpacks"]);
+const catalogCache = new Map<string, Promise<Catalog>>();
+
+/** Every file under `dir` whose name ends in one of `exts` (depth-limited; folders in SKIP_DIRS are not read). */
+async function filesUnder(host: string, dir: string, exts: string[], depth: number, out: Array<{ path: string }> = []): Promise<Array<{ path: string }>> {
+  const es = await fs.listDir(at(host, dir)).catch(() => []);
+  for (const e of es) {
+    if (e.isDir) { if (depth > 0 && !SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) await filesUnder(host, e.path, exts, depth - 1, out); continue; }
+    if (exts.some((x) => e.name.endsWith(x))) out.push({ path: e.path });
+  }
+  return out;
+}
+
+async function dirsOf(host: string, dir: string): Promise<string[]> {
+  const es = await fs.listDir(at(host, dir)).catch(() => []);
+  return es.filter((e) => e.isDir && !e.name.startsWith(".")).map((e) => e.name).sort();
+}
+
+/** Read `paths` a few at a time (a project has thousands of suits). */
+async function readAll(host: string, paths: Array<{ path: string }>): Promise<SourceFile[]> {
+  const out: SourceFile[] = [];
+  for (let i = 0; i < paths.length; i += 32) {
+    const part = paths.slice(i, i + 32);
+    const texts = await Promise.all(part.map((f) => readText(host, f.path)));
+    part.forEach((f, j) => { if (texts[j] !== null) out.push({ path: f.path, text: texts[j]! }); });
+  }
+  return out;
+}
+
+/**
+ * The project's catalog for namespace `ns`, read once per set of resource roots: every ability script of every namespace, the
+ * suits, flight profiles and lang files of `ns` (the lang files of every namespace, for keybind names).
+ */
+export function loadCatalog(host: string, roots: string[], ns: string): Promise<Catalog> {
+  const key = host + ":" + ns + ":" + roots.join("|");
+  let p = catalogCache.get(key);
+  if (!p) {
+    p = (async () => {
+      const files: SourceFile[] = [];
+      for (const r of roots) {
+        for (const nsDir of await dirsOf(host, `${r}/data`)) {
+          const base = `${r}/data/${nsDir}`;
+          files.push(...(await readAll(host, await filesUnder(host, `${base}/abilities`, [".js", ".json"], 6))));
+          if (nsDir === ns) {
+            files.push(...(await readAll(host, await filesUnder(host, `${base}/armors`, [".json"], 6))));
+            files.push(...(await readAll(host, await filesUnder(host, `${base}/flight_profiles`, [".json"], 3))));
+          }
+        }
+        for (const langNs of await dirsOf(host, `${r}/assets`)) {
+          const lang = `${r}/assets/${langNs}/lang/en_us.json`;
+          const t = await readText(host, lang);
+          if (t !== null) files.push({ path: lang, text: t });
+        }
+      }
+      return scanCatalog(files, ns);
+    })();
+    catalogCache.set(key, p);
+    p.catch(() => catalogCache.delete(key));
+  }
+  return p;
+}

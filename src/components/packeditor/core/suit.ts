@@ -6,7 +6,7 @@
  */
 import { applyEdits, plain, scanCalls, setProp, strArg, objArg, entry, type JsCall, type JsObj } from "./jsdsl";
 import { parseAnchor, type AnchorSpec } from "./anchors";
-import { detectStyle, emitJson, fromValue, getIn, isArr, isObj, parseJson, setIn, toValue, type JNode, type Path } from "../../animstudio/core/format/json";
+import { derive, detectStyle, emitJson, fromValue, getIn, getKey, isArr, isObj, jarr, parseJson, setEntry, setIn, toValue, type JArr, type JNode, type JObj, type Path } from "../../animstudio/core/format/json";
 
 export interface SuitAbility {
   index: number;
@@ -19,6 +19,14 @@ export interface SuitAbility {
 export interface Suit {
   tier?: number;
   wip?: boolean;
+  boss?: boolean;
+  priority?: number;
+  parent?: string;
+  suitRecipe?: string;
+  /** `thematic:ladder` and other suit types; undefined for a plain suit */
+  type?: string;
+  fightingType: string[];
+  tags: string[];
   flightType?: string;
   flightProfile?: string;
   jetGroups?: string;
@@ -52,9 +60,17 @@ export function readSuit(text: string): Suit {
     assets: a?.assets && typeof a.assets === "object" ? (a.assets as Record<string, unknown>) : undefined,
     remove: a?.remove === true || undefined,
   })) : [];
+  const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   return {
     tier: typeof raw.tier === "number" ? raw.tier : undefined,
     wip: typeof raw.wip === "boolean" ? raw.wip : undefined,
+    boss: typeof raw.boss === "boolean" ? raw.boss : undefined,
+    priority: typeof raw.priority === "number" ? raw.priority : undefined,
+    parent: typeof raw.parent === "string" ? raw.parent : undefined,
+    suitRecipe: typeof raw["suit-recipe"] === "string" ? (raw["suit-recipe"] as string) : undefined,
+    type: typeof raw.type === "string" ? raw.type : undefined,
+    fightingType: strs(raw.fighting_type),
+    tags: strs(raw.tags),
     flightType: typeof raw.flight_type === "string" ? raw.flight_type : undefined,
     flightProfile: typeof raw.flight_profile === "string" ? raw.flight_profile : undefined,
     jetGroups: typeof raw.jet_groups === "string" ? raw.jet_groups : undefined,
@@ -144,3 +160,105 @@ export function setRenderFrom(src: string, index: number, value: unknown): strin
 export const BEAM_VISUALS = new Set(["thematic:beam", "thematic:layered_beam", "thematic:hand_beam"]);
 
 export { isArr, isObj };
+
+// ---------------------------------------------------------------- node edits (every one returns the new text)
+
+/** The keys a suit file is written with, in the order the shipped suits use (docs/addon-format.md). A new key goes before the first existing key that follows it here. */
+export const SUIT_KEYS = ["_comment", "__id", "__collection", "type", "wip", "parent", "suit-recipe", "tier", "abilities", "stats", "attributes", "fighting_type", "tags", "flight_type", "flight_profile", "jet_groups", "boss", "priority"] as const;
+const keyRank = (k: string) => {
+  const i = (SUIT_KEYS as readonly string[]).indexOf(k);
+  return i < 0 ? SUIT_KEYS.length : i;
+};
+
+/** Apply `fn` to the file's root and re-emit it: the untouched parts keep their bytes. A `fn` that changes nothing returns `text`. */
+export function editRoot(text: string, fn: (root: JNode) => JNode): string {
+  const p = parseJson(text);
+  const style = detectStyle(text, p.start, p.end);
+  const root = fn(p.root);
+  if (root === p.root) return text;
+  return text.slice(0, p.start) + emitJson(root, style) + text.slice(p.end);
+}
+
+function objRoot(root: JNode): JObj {
+  if (!isObj(root)) throw new Error("a suit file is a JSON object");
+  return root;
+}
+
+function listOf(o: JObj, key: string): JArr | undefined {
+  const n = getKey(o, key);
+  if (n !== undefined && !isArr(n)) throw new Error(`${key} is not a list`);
+  return n;
+}
+
+/** Set a top-level field (`value` undefined removes it). A new field lands in SUIT_KEYS order. */
+export function setTop(text: string, key: string, value: unknown): string {
+  return editRoot(text, (root) => {
+    const o = objRoot(root);
+    const node = value === undefined ? undefined : fromValue(value, getKey(o, key));
+    return setEntry(o, key, node, (k) => keyRank(k) > keyRank(key));
+  });
+}
+
+/** Append an object to a top-level list (the list is created when missing), in the list's own layout. */
+export function listAdd(text: string, key: string, item: Record<string, unknown>): string {
+  return editRoot(text, (root) => {
+    const o = objRoot(root);
+    const cur = listOf(o, key);
+    if (!cur) return setEntry(o, key, jarr([fromValue(item, o)], o), (k) => keyRank(k) > keyRank(key));
+    const like = cur.items[cur.items.length - 1];
+    return setIn(o, [key], derive(cur, [...cur.items, fromValue(item, like)]));
+  });
+}
+
+/** Remove the list item at `index`. */
+export function listRemove(text: string, key: string, index: number): string {
+  return editRoot(text, (root) => {
+    const cur = listOf(objRoot(root), key);
+    if (!cur || index < 0 || index >= cur.items.length) return root;
+    return setIn(root, [key], derive(cur, cur.items.filter((_, i) => i !== index)));
+  });
+}
+
+/** Move the list item at `from` so it ends up at `to` (its index afterwards). */
+export function listMove(text: string, key: string, from: number, to: number): string {
+  return editRoot(text, (root) => {
+    const cur = listOf(objRoot(root), key);
+    if (!cur || from === to || from < 0 || to < 0 || from >= cur.items.length || to >= cur.items.length) return root;
+    const items = cur.items.slice();
+    const [moved] = items.splice(from, 1);
+    items.splice(to, 0, moved);
+    return setIn(root, [key], derive(cur, items));
+  });
+}
+
+/** Set one field of the list item at `index` (`value` undefined removes the field). */
+export function listSet(text: string, key: string, index: number, field: string, value: unknown): string {
+  return editRoot(text, (root) => {
+    const cur = listOf(objRoot(root), key);
+    const item = cur?.items[index];
+    if (!cur || !item || !isObj(item)) return root;
+    const node = value === undefined ? undefined : fromValue(value, getKey(item, field));
+    return setIn(root, [key, index, field], node);
+  });
+}
+
+/** Stat rows (`stats`) as the designer reads them; rows that aren't objects keep their index and read as empty. */
+export interface StatRow { index: number; identifier: string; minimum?: number; maximum?: number }
+export function readStats(raw: Record<string, unknown>): StatRow[] {
+  return (Array.isArray(raw.stats) ? (raw.stats as Array<Record<string, unknown>>) : []).map((s, index) => ({
+    index,
+    identifier: typeof s?.identifier === "string" ? s.identifier : "",
+    minimum: typeof s?.minimum === "number" ? s.minimum : undefined,
+    maximum: typeof s?.maximum === "number" ? s.maximum : undefined,
+  }));
+}
+
+/** `attributes` rows (`{identifier, effect}`), the Pehkui and other scales a suit sets. */
+export interface AttributeRow { index: number; identifier: string; effect?: number }
+export function readAttributes(raw: Record<string, unknown>): AttributeRow[] {
+  return (Array.isArray(raw.attributes) ? (raw.attributes as Array<Record<string, unknown>>) : []).map((a, index) => ({
+    index,
+    identifier: typeof a?.identifier === "string" ? a.identifier : "",
+    effect: typeof a?.effect === "number" ? a.effect : undefined,
+  }));
+}

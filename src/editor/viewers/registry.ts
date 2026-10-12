@@ -30,7 +30,7 @@ export interface Provider {
 const PACK_FILE = /\/data\/[^/]+\/(armors|abilities|huds|flight_profiles)\/.+\.(json|js)$|\/guide\/[^/]+\/[^/]+\/(entries|categories)\/.+\.json$/;
 
 export const PROVIDERS: Provider[] = [
-  { id: "pack", title: "Pack editor", kind: "dual", exts: [], match: (p) => PACK_FILE.test(p.replace(/\\/g, "/")), defaultMode: "split", previewLabel: "Designer" },
+  { id: "pack", title: "Pack editor", kind: "dual", exts: [], match: (p) => PACK_FILE.test(p.replace(/\\/g, "/")), defaultMode: "preview", previewLabel: "Designer" },
   { id: "mcmeta", title: "Animated texture", kind: "dual", exts: [], suffix: ".png.mcmeta", defaultMode: "split", previewLabel: "Animation" },
   { id: "image", title: "Image", kind: "viewer", exts: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "icns", "tga", "avif", "cur"] },
   { id: "svg", title: "SVG", kind: "dual", exts: ["svg"], defaultMode: "preview", previewLabel: "Image" },
