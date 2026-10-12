@@ -1,3 +1,4 @@
+import { relativeTo } from "../../lib/paths";
 /** Small pure helpers shared by the run configuration code (shell-like argument splitting, paths). */
 
 /** Split a command line like a POSIX shell would: whitespace separated, '…' and "…" quoting, backslash escapes. */
@@ -42,7 +43,7 @@ export function shellQuote(a: string): string {
 }
 export const shellJoin = (argv: string[]) => argv.map(shellQuote).join(" ");
 
-export const isAbsPath = (p: string) => p.startsWith("/") || p.startsWith("~");
+export const isAbsPath = (p: string) => p.startsWith("/") || p.startsWith("~") || /^[A-Za-z]:[\\/]/.test(p);
 
 /** Collapse `.`/`..`/duplicate slashes of an absolute path. */
 export function normPath(p: string): string {
@@ -58,7 +59,7 @@ export function normPath(p: string): string {
   return (abs ? "/" : "") + parts.join("/");
 }
 export const resolvePath = (base: string, p: string) => (isAbsPath(p) ? normPath(p) : normPath(`${base}/${p}`));
-export const relPath = (root: string, p: string) => (p.startsWith(root.endsWith("/") ? root : root + "/") ? p.slice(root.length).replace(/^\//, "") : p);
+export const relPath = (root: string, p: string) => relativeTo(root, p);
 
 /** [key, value] rows of an env field -> record (empty keys dropped). */
 export function envRecord(rows: unknown): Record<string, string> {

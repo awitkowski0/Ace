@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
 import { PopupShell, type PopupProps } from "../shell/popups";
@@ -70,7 +71,7 @@ export function DiffView({ spec, onClose, tabKey, groupId }: { spec: DiffSpec; o
       <div className="gitdiff-bar">
         <span className="gitdiff-title">{spec.title}</span>
         <div className="grow" />
-        <button className="gitbtn" onClick={() => go("previous")} title="Previous Difference (⇧F7)">↑</button>
+        <button className="gitbtn" onClick={() => go("previous")} title={`Previous Difference (${formatShortcut("⇧F7")})`}>↑</button>
         <button className="gitbtn" onClick={() => go("next")} title="Next Difference (F7)">↓</button>
         {spec.openLoc && (
           <button className="gitbtn" onClick={() => { openFile(spec.openLoc!); onClose?.(); }}>Open in Editor</button>

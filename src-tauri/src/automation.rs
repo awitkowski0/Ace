@@ -10,9 +10,8 @@
 use parking_lot::Mutex;
 use serde_json::json;
 use std::collections::HashMap;
+use crate::studio_bridge::local_ipc;
 use std::io::{Read, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
@@ -69,28 +68,17 @@ pub fn start(app: &AppHandle) {
         return;
     }
     let path = sock_path();
-    if UnixStream::connect(&path).is_ok() {
+    if local_ipc::Stream::connect(&path).is_ok() {
         eprintln!("[automation] {} is served by another live instance; not binding", path.display());
         return;
     }
-    let _ = std::fs::remove_file(&path);
-    let listener = match UnixListener::bind(&path) {
+    let listener = match local_ipc::bind(&path) {
         Ok(l) => l,
         Err(e) => return eprintln!("[automation] bind {}: {e}", path.display()),
     };
-    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     let _ = std::fs::write(format!("{}.pid", path.display()), std::process::id().to_string());
     eprintln!("[automation] listening on {}", path.display());
-    let app = app.clone();
-    std::thread::Builder::new()
-        .name("automation".into())
-        .spawn(move || {
-            for conn in listener.incoming().flatten() {
-                let app = app.clone();
-                std::thread::spawn(move || handle(app, conn));
-            }
-        })
-        .ok();
+    local_ipc::spawn_server(listener, "automation", app.clone(), handle);
 }
 
 fn trace() -> bool {
@@ -98,7 +86,7 @@ fn trace() -> bool {
     *T.get_or_init(|| std::env::var_os("ATELIER_AUTOMATION_TRACE").is_some())
 }
 
-fn handle(app: AppHandle, mut conn: UnixStream) {
+fn handle(app: AppHandle, mut conn: local_ipc::Stream) {
     let t0 = std::time::Instant::now();
     // A request ends at EOF or at a NUL byte. The NUL matters: Node's `socket.end()` sometimes never delivers the FIN
     // (measured ~1 in 700 connections), which used to leave `read_to_string` blocked until the client gave up.

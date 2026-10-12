@@ -1,0 +1,12 @@
+{
+  "name": "ace-local",
+  "description": "Local marketplace for plugins that ship with the Ace IDE",
+  "owner": { "name": "Ace" },
+  "plugins": [
+    {
+      "name": "ace-studio",
+      "source": "./ace-studio",
+      "description": "Animation Studio tools (MCP server) and skills for Thematic geo/animation assets and asset git"
+    }
+  ]
+}

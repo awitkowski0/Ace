@@ -45,8 +45,28 @@ fn home() -> PathBuf {
 }
 
 fn is_exec(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    p.metadata().map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    p.metadata().map(|m| m.is_file() && crate::platform::is_executable(p, &m)).unwrap_or(false)
+}
+
+/// The interpreter of an environment prefix: `bin/<name>` on unix, `Scripts\python.exe` (or `python.exe` at the root) on Windows.
+fn env_python(prefix: &Path, name: &str) -> PathBuf {
+    if cfg!(windows) {
+        let scripts = prefix.join("Scripts").join("python.exe");
+        if scripts.is_file() {
+            return scripts;
+        }
+        return prefix.join("python.exe");
+    }
+    prefix.join("bin").join(name)
+}
+
+/// File names to try for a tool on PATH: the bare name on unix; `.exe`/`.cmd`/`.bat` on Windows (npm shims are `.cmd`).
+fn exe_names(bin: &str) -> Vec<String> {
+    if cfg!(windows) {
+        vec![format!("{bin}.exe"), format!("{bin}.cmd"), format!("{bin}.bat")]
+    } else {
+        vec![bin.to_string()]
+    }
 }
 
 fn version_from_cfg(env_root: &Path) -> Option<String> {
@@ -99,7 +119,7 @@ fn discover_local(root: &str) -> Vec<Interp> {
     let is_poetry = pyproject.contains("[tool.poetry]");
     for d in [".venv", "venv", "env", ".env", ".virtualenv"] {
         let env = rootp.join(d);
-        let py = env.join("bin/python");
+        let py = env_python(&env, "python");
         if is_exec(&py) {
             let kind = if rootp.join("uv.lock").is_file() && d == ".venv" { "uv" } else if is_poetry && d == ".venv" { "poetry" } else { "venv" };
             cands.push(Cand { path: py.to_string_lossy().into(), kind, env_root: Some(env.to_string_lossy().into()), label: Some(proj_name.clone()), project: true });
@@ -119,7 +139,7 @@ fn discover_local(root: &str) -> Vec<Interp> {
         for env in dir_names(&dir) {
             let n = env.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             if slug(&n).starts_with(&format!("{want}-")) || n.starts_with(&format!("{proj_name}-")) {
-                let py = env.join("bin/python");
+                let py = env_python(&env, "python");
                 if is_exec(&py) {
                     cands.push(Cand { path: py.to_string_lossy().into(), kind, env_root: Some(env.to_string_lossy().into()), label: Some(proj_name.clone()), project: true });
                 }
@@ -131,48 +151,50 @@ fn discover_local(root: &str) -> Vec<Interp> {
     if let Ok(t) = std::fs::read_to_string(home().join(".conda/environments.txt")) {
         prefixes.extend(t.lines().map(str::trim).filter(|l| l.starts_with('/')).map(PathBuf::from));
     }
-    for d in crate::lsp::login_path().split(':') {
-        let c = Path::new(d).join("conda");
-        if let Ok(real) = c.canonicalize() {
-            if let Some(base) = real.parent().and_then(|b| b.parent()) {
-                prefixes.push(base.to_path_buf());
-                for e in dir_names(&base.join("envs")) {
-                    prefixes.push(e);
+    'conda: for d in std::env::split_paths(crate::lsp::login_path()) {
+        for name in exe_names("conda") {
+            if let Ok(real) = d.join(name).canonicalize() {
+                if let Some(base) = real.parent().and_then(|b| b.parent()) {
+                    prefixes.push(base.to_path_buf());
+                    for e in dir_names(&base.join("envs")) {
+                        prefixes.push(e);
+                    }
                 }
+                break 'conda;
             }
-            break;
         }
     }
     for p in prefixes {
-        let py = p.join("bin/python");
+        let py = if cfg!(windows) { p.join("python.exe") } else { p.join("bin/python") };
         if is_exec(&py) && p.join("conda-meta").is_dir() {
             let name = if p.join("envs").is_dir() { "base".to_string() } else { p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() };
             cands.push(Cand { path: py.to_string_lossy().into(), kind: "conda", env_root: Some(p.to_string_lossy().into()), label: Some(name), project: false });
         }
     }
     for v in dir_names(&home().join(".pyenv/versions")) {
-        let py = v.join("bin/python");
+        let py = env_python(&v, "python");
         if is_exec(&py) {
             cands.push(Cand { path: py.to_string_lossy().into(), kind: "pyenv", env_root: None, label: None, project: false });
         }
     }
     for v in dir_names(&home().join(".local/share/uv/python")) {
-        let py = v.join("bin/python3");
+        let py = env_python(&v, "python3");
         if is_exec(&py) {
             cands.push(Cand { path: py.to_string_lossy().into(), kind: "system", env_root: None, label: Some("uv".into()), project: false });
         }
     }
     let mut sys: Vec<PathBuf> = Vec::new();
-    for d in crate::lsp::login_path().split(':').filter(|d| !d.is_empty()) {
-        for n in dir_names(Path::new(d)) {
+    for d in std::env::split_paths(crate::lsp::login_path()).filter(|d| !d.as_os_str().is_empty()) {
+        for n in dir_names(&d) {
             let f = n.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            let f = if cfg!(windows) { f.strip_suffix(".exe").unwrap_or(&f).to_string() } else { f };
             if f == "python3" || f == "python" || (f.starts_with("python3.") && f[8..].chars().all(|c| c.is_ascii_digit())) {
                 sys.push(n);
             }
         }
     }
     for v in dir_names(Path::new("/Library/Frameworks/Python.framework/Versions")) {
-        sys.push(v.join("bin/python3"));
+        sys.push(env_python(&v, "python3"));
     }
     sys.push(PathBuf::from("/usr/bin/python3"));
     for p in sys {
@@ -198,7 +220,7 @@ fn discover_local(root: &str) -> Vec<Interp> {
                     if let Some(v) = c.env_root.as_deref().and_then(|e| version_from_cfg(Path::new(e))) {
                         return Some(v);
                     }
-                    let o = std::process::Command::new(&c.path).arg("--version").stdin(std::process::Stdio::null()).output().ok()?;
+                    let o = std::process::Command::new(crate::platform::resolve_program(&c.path)).arg("--version").stdin(std::process::Stdio::null()).output().ok()?;
                     parse_version(&String::from_utf8_lossy(&o.stdout)).or_else(|| parse_version(&String::from_utf8_lossy(&o.stderr)))
                 })
             })
@@ -333,11 +355,11 @@ pub async fn py_tools(window: WebviewWindow, host: String, python: Option<String
             if let Some(p) = python.as_deref().and_then(|p| Path::new(p).parent()) {
                 dirs.push(p.to_path_buf());
             }
-            dirs.extend(crate::lsp::login_path().split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+            dirs.extend(std::env::split_paths(crate::lsp::login_path()).filter(|d| !d.as_os_str().is_empty()));
             dirs.push(home().join(".local/bin"));
             dirs.push(home().join(".cargo/bin"));
             for t in TOOLS {
-                if let Some(p) = dirs.iter().map(|d| d.join(t)).find(|p| is_exec(p)) {
+                if let Some(p) = dirs.iter().flat_map(|d| exe_names(t).into_iter().map(move |n| d.join(n))).find(|p| is_exec(p)) {
                     out.insert(t.to_string(), p.to_string_lossy().into_owned());
                 }
             }
@@ -364,6 +386,15 @@ fn tail(s: &str) -> String {
     lines[lines.len().saturating_sub(8)..].join("\n")
 }
 
+/// Interpreter path of a venv created at `dir` (the string form of `env_python`, without touching the disk).
+fn venv_python_str(dir: &str) -> String {
+    if cfg!(windows) {
+        format!("{}\\Scripts\\python.exe", dir.trim_end_matches(['/', '\\']))
+    } else {
+        format!("{}/bin/python", dir.trim_end_matches('/'))
+    }
+}
+
 /// New virtual environment at `dir` with `uv venv --seed` (tool "uv") or `python -m venv`. Returns the interpreter path.
 #[tauri::command]
 pub async fn py_create_venv(window: WebviewWindow, host: String, dir: String, base: Option<String>, tool: String, uv: Option<String>, system_site: Option<bool>) -> Result<String, String> {
@@ -381,7 +412,8 @@ pub async fn py_create_venv(window: WebviewWindow, host: String, dir: String, ba
             a.push(dir.clone());
             a
         } else {
-            let mut a = vec![base.clone().unwrap_or_else(|| "python3".into()), "-m".into(), "venv".into()];
+            let default = if cfg!(windows) { "python" } else { "python3" };
+            let mut a = vec![base.clone().unwrap_or_else(|| default.into()), "-m".into(), "venv".into()];
             if site {
                 a.push("--system-site-packages".into());
             }
@@ -400,7 +432,7 @@ pub async fn py_create_venv(window: WebviewWindow, host: String, dir: String, ba
         } else if o.code != Some(0) {
             return Err(tail(&format!("{}\n{}", o.stderr, o.stdout)));
         }
-        Ok(format!("{}/bin/python", dir.trim_end_matches('/')))
+        Ok(venv_python_str(&dir))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -417,7 +449,7 @@ pub async fn py_create_conda(window: WebviewWindow, host: String, conda: String,
         if o.code != Some(0) {
             return Err(tail(&format!("{}\n{}", o.stderr, o.stdout)));
         }
-        Ok(format!("{}/bin/python", dir.trim_end_matches('/')))
+        Ok(if cfg!(windows) { format!("{}\\python.exe", dir.trim_end_matches(['/', '\\'])) } else { format!("{}/bin/python", dir.trim_end_matches('/')) })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -508,7 +540,7 @@ pub async fn py_pypi_info(name: String) -> Result<serde_json::Value, String> {
 /// Nothing is installed into any environment: runs add this directory to PYTHONPATH.
 #[tauri::command]
 pub fn py_scripts_dir() -> Result<String, String> {
-    let dir = std::env::temp_dir().join(format!("ace-python-v1-{}", unsafe { libc::getuid() }));
+    let dir = std::env::temp_dir().join(format!("ace-python-v1-{}", crate::platform::user_tag()));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     for (n, body) in [("ace_pytest.py", PYTEST_PLUGIN), ("ace_unittest.py", UNITTEST_RUNNER), ("ace_console.py", CONSOLE)] {
         let p = dir.join(n);

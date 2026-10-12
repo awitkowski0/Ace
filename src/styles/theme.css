@@ -91,6 +91,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .tree-row:hover { background: var(--bg-hover); }
 .tree-row.selected { background: var(--bg-selected); }
 .tree:not(:focus-within) .tree-row.selected { background: var(--bg-hover); }
+.tree-row.drop { outline: 1px solid var(--accent); outline-offset: -1px; }
 .tree-chev { width: 14px; display: grid; place-items: center; color: var(--fg-dim); }
 .tree-icon { display: grid; place-items: center; color: var(--fg-dim); }
 .tree-icon.dir { color: var(--nord9); }
@@ -156,9 +157,6 @@ button.primary, .dialog-buttons button.primary { background: var(--accent-bg); c
 .menu-shortcut { color: var(--fg-faint); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 
-.welcome { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
-.welcome h1 { font-weight: 500; margin: 0; }
-.welcome-recent { width: 420px; }
 
 /* scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

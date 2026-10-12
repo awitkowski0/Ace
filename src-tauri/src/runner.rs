@@ -7,11 +7,11 @@
 //!       `run://exit/<id>` {code: number|null, signal: number|null}
 //!   run_write(id, data)  run_close_stdin(id)  run_stop(id)
 //!   proc_exec({spec, stdin?, timeoutMs?}) -> {code, stdout, stderr, timedOut}   one-shot capture
+use crate::platform::{self, Sig};
 use crate::remote::ssh;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::process::ExitStatusExt;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Mutex, OnceLock};
@@ -49,26 +49,35 @@ fn expand_home(p: &str) -> String {
 const BASE_ENV: [(&str, &str); 2] = [("PYTHONUNBUFFERED", "1"), ("PYTHONIOENCODING", "utf-8")];
 
 fn local_command(s: &Spec) -> Result<Command, String> {
+    let cwd = expand_home(&s.cwd);
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let mut path = s.path_prepend.join(sep);
+    if !path.is_empty() {
+        path.push_str(sep);
+    }
+    path.push_str(crate::lsp::login_path());
     let mut cmd = if let Some(sh) = &s.shell {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        let mut c = Command::new(shell);
-        c.args(["-lc", sh]);
-        c
+        if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", sh]);
+            c
+        } else {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+            let mut c = Command::new(shell);
+            c.args(["-lc", sh]);
+            c
+        }
     } else {
         let first = s.argv.first().ok_or("empty command")?;
-        let mut c = Command::new(first);
+        // Windows: a bare `gradle` / `npm` is a .cmd shim, which Command::new does not find by name.
+        let prog = crate::platform::resolve_program_on(first, Some(std::path::Path::new(&cwd)), std::ffi::OsStr::new(&path));
+        let mut c = Command::new(prog);
         c.args(&s.argv[1..]);
         c
     };
-    let cwd = expand_home(&s.cwd);
     if std::path::Path::new(&cwd).is_dir() {
-        cmd.current_dir(cwd);
+        cmd.current_dir(&cwd);
     }
-    let mut path = s.path_prepend.join(":");
-    if !path.is_empty() {
-        path.push(':');
-    }
-    path.push_str(crate::lsp::login_path());
     cmd.env("PATH", path);
     for (k, v) in BASE_ENV {
         cmd.env(k, v);
@@ -193,7 +202,7 @@ pub fn exec(owner: &str, s: &Spec, stdin: Option<&str>, timeout: Duration) -> Re
     crate::procs::unregister(pid_reg);
     let stdout = String::from_utf8_lossy(&h1.join().unwrap_or_default()).into_owned();
     let stderr = String::from_utf8_lossy(&h2.join().unwrap_or_default()).into_owned();
-    Ok(ExecOut { code: status.and_then(|s| s.code().or_else(|| s.signal().map(|g| 128 + g))), stdout, stderr, timed_out })
+    Ok(ExecOut { code: status.and_then(|s| s.code().or_else(|| platform::exit_signal(&s).map(|g| 128 + g))), stdout, stderr, timed_out })
 }
 
 #[tauri::command]
@@ -305,7 +314,7 @@ pub fn run_start(app: AppHandle, window: WebviewWindow, id: Option<String>, spec
     let wid = id.clone();
     std::thread::Builder::new().name(format!("run-wait-{wid}")).spawn(move || {
         let st = child.wait().ok();
-        let _ = wtx.send(Msg::Exit(st.and_then(|s| s.code()), st.and_then(|s| s.signal())));
+        let _ = wtx.send(Msg::Exit(st.and_then(|s| s.code()), st.and_then(|s| platform::exit_signal(&s))));
     }).map_err(|e| e.to_string())?;
     let eid = id.clone();
     std::thread::Builder::new().name(format!("run-emit-{eid}")).spawn(move || {
@@ -408,7 +417,7 @@ pub fn run_interrupt(id: String) {
     let mut g = runs().lock().unwrap();
     if let Some(r) = g.get_mut(&id) {
         if r.local {
-            unsafe { libc::killpg(r.pid as i32, libc::SIGINT) };
+            platform::signal_group(r.pid, Sig::Int);
         } else if let Some(si) = r.stdin.as_mut() {
             let _ = si.write_all(&[3]).and_then(|_| si.flush());
         }

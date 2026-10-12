@@ -609,6 +609,15 @@ pub fn release_window(label: &str) {
 
 #[tauri::command]
 pub fn claude_reveal(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        // explorer needs `/select,"<path>"` verbatim (raw_arg), and it exits 1 even on success: only a spawn failure counts.
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.raw_arg(format!("/select,\"{path}\""));
+        return crate::platform::no_window(&mut cmd).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    #[cfg(not(windows))]
     std::process::Command::new("open").args(["-R", &path]).status().map(|_| ()).map_err(|e| e.to_string())
 }
 

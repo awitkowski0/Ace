@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fs } from "../../lib/ipc";
 import type { Doc } from "../store";
@@ -241,17 +242,17 @@ export function ImageView({ doc, groupId, data, forceExt }: { doc: Doc; groupId:
   return (
     <div className="iv" tabIndex={0} data-viewer="image">
       <div className="iv-bar">
-        <button title="Zoom Out (⌘-)" onClick={() => setManual(nextStep(zoom, -1))}>−</button>
+        <button title={`Zoom Out (${formatShortcut("⌘-")})`} onClick={() => setManual(nextStep(zoom, -1))}>−</button>
         <span className="iv-zoom" data-testid="zoom">{Math.round(zoom * 100)}%</span>
-        <button title="Zoom In (⌘=)" onClick={() => setManual(nextStep(zoom, 1))}>+</button>
-        <button title="Actual Size (⌘/)" onClick={() => setManual(1)}>1:1</button>
-        <button title="Fit to Window (⌘0)" className={zoomMode === "fit" ? "on" : ""} onClick={() => setZoomMode("fit")}>Fit</button>
+        <button title={`Zoom In (${formatShortcut("⌘=")})`} onClick={() => setManual(nextStep(zoom, 1))}>+</button>
+        <button title={`Actual Size (${formatShortcut("⌘/")})`} onClick={() => setManual(1)}>1:1</button>
+        <button title={`Fit to Window (${formatShortcut("⌘0")})`} className={zoomMode === "fit" ? "on" : ""} onClick={() => setZoomMode("fit")}>Fit</button>
         <span className="iv-sep" />
         <button title="Checkerboard" className={"sw checker" + (bg === "checker" ? " on" : "")} onClick={() => setPrefs(doc.key, { bg: "checker" })} />
         <button title="Light background" className={"sw light" + (bg === "light" ? " on" : "")} onClick={() => setPrefs(doc.key, { bg: "light" })} />
         <button title="Dark background" className={"sw dark" + (bg === "dark" ? " on" : "")} onClick={() => setPrefs(doc.key, { bg: "dark" })} />
         <span className="iv-sep" />
-        <button title="Show Pixel Grid (⌘')" className={grid ? "on" : ""} onClick={() => setPrefs(doc.key, { grid: !grid })}>Grid</button>
+        <button title={`Show Pixel Grid (${formatShortcut("⌘'")})`} className={grid ? "on" : ""} onClick={() => setPrefs(doc.key, { grid: !grid })}>Grid</button>
         {mc && (
           <>
             <span className="iv-sep" />

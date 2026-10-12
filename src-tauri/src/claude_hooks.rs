@@ -30,12 +30,36 @@ use tauri::{AppHandle, WebviewWindow};
 
 /// One line per hook call: "<pane id> <single-line hook json>". A single printf = a single write(2) on an O_APPEND file,
 /// so concurrent hooks cannot interleave. No-op when the env is missing (e.g. settings reused outside Ace).
+#[cfg(any(not(windows), test))]
 const HOOK_CMD: &str = r#"[ -n "$ATELIER_HOOK_FILE" ] && printf "%s %s\n" "$ATELIER_PANE" "$(tr "\n" " ")" >> "$ATELIER_HOOK_FILE"; exit 0"#;
+
+/// The same line for Windows (no sh needed; Claude Code runs hooks through Git Bash or cmd). PowerShell reads the hook JSON from
+/// stdin, joins it into one line, and appends `<pane> <json>` to `$env:ATELIER_HOOK_FILE` as UTF-8 without a BOM (Out-File would add
+/// one and corrupt the first line). The script goes in as -EncodedCommand (base64 UTF-16LE) so neither cmd nor bash touches its quoting.
+/// Unlike the unix line this runs PowerShell per hook call (~0.3 s); the hook timeout is 5 s.
+#[cfg(any(windows, test))]
+fn win_hook_cmd() -> String {
+    use base64::Engine as _;
+    const PS: &str = "if ($env:ATELIER_HOOK_FILE) { $j = [Console]::In.ReadToEnd() -replace '[\\r\\n]+', ' '; \
+[IO.File]::AppendAllText($env:ATELIER_HOOK_FILE, $env:ATELIER_PANE + ' ' + $j + [char]10, (New-Object System.Text.UTF8Encoding $false)) }";
+    let utf16: Vec<u8> = PS.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    format!("powershell -NoProfile -NonInteractive -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(utf16))
+}
+
+#[cfg(not(windows))]
+fn hook_cmd() -> String {
+    HOOK_CMD.to_string()
+}
+#[cfg(windows)]
+fn hook_cmd() -> String {
+    win_hook_cmd()
+}
 
 pub fn settings_json() -> &'static str {
     static S: OnceLock<String> = OnceLock::new();
     S.get_or_init(|| {
-        let h = || serde_json::json!([{ "hooks": [{ "type": "command", "command": HOOK_CMD, "timeout": 5 }] }]);
+        let cmd = hook_cmd();
+        let h = || serde_json::json!([{ "hooks": [{ "type": "command", "command": cmd, "timeout": 5 }] }]);
         serde_json::json!({ "hooks": { "Stop": h(), "Notification": h(), "UserPromptSubmit": h() } }).to_string()
     })
 }
@@ -66,7 +90,33 @@ pub fn wrap_command(cmd: &str, host: &str) -> Option<String> {
     if first.map_or(false, |f| PASSTHROUGH.contains(&f)) || rest.split_whitespace().any(|a| PASSTHROUGH_FLAGS.contains(&a)) {
         return None;
     }
-    Some(format!("{} --settings {}{}", claude_bin(host), ssh::quote(settings_json()), rest))
+    // The ace-studio plugin (docs/ANIMSTUDIO.md, plugins/ace-studio) rides along for local sessions: --plugin-dir is session-only,
+    // nothing is installed into ~/.claude. Remote hosts only get it if the bundle exists there (not wired: see plugins/ace-studio/README.md).
+    let plugin = if host == "local" { plugin_dir().map(|p| format!(" --plugin-dir {}", ssh::quote(p))).unwrap_or_default() } else { String::new() };
+    Some(format!("{} --settings {}{}{}", claude_bin(host), ssh::quote(settings_json()), plugin, rest))
+}
+
+/// Directory of the bundled `ace-studio` Claude Code plugin, if this build can find one: `ATELIER_ACE_PLUGIN` (empty = disabled),
+/// else `<repo>/plugins/ace-studio` next to the binary (dev builds) or `Resources/plugins/ace-studio` (app bundle). It must contain
+/// the built server (`server/ace-mcp.mjs`, `pnpm build:mcp`).
+pub fn plugin_dir() -> Option<&'static str> {
+    static P: OnceLock<Option<String>> = OnceLock::new();
+    P.get_or_init(|| {
+        let ok = |d: &Path| d.join(".claude-plugin/plugin.json").is_file() && d.join("server/ace-mcp.mjs").is_file();
+        if let Some(v) = std::env::var_os("ATELIER_ACE_PLUGIN") {
+            let d = PathBuf::from(v);
+            return (!d.as_os_str().is_empty() && ok(&d)).then(|| d.to_string_lossy().into_owned());
+        }
+        let mut cands: Vec<PathBuf> = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../plugins/ace-studio")];
+        if let Ok(exe) = std::env::current_exe() {
+            for a in exe.ancestors().skip(1).take(6) {
+                cands.push(a.join("plugins/ace-studio"));
+                cands.push(a.join("Resources/plugins/ace-studio"));
+            }
+        }
+        cands.into_iter().filter_map(|c| c.canonicalize().ok()).find(|c| ok(c)).map(|c| c.to_string_lossy().into_owned())
+    })
+    .as_deref()
 }
 
 /// `NAME='v' ` assignments (shell prefix) that carry the channel into the claude process / interactive shell.
@@ -120,7 +170,17 @@ struct Chan {
     file: String,
     host: String,
     proc_id: u64,
-    _stdin: ChildStdin,
+    /// the reader script's stdin: dropping it ends the script (unix / remote)
+    _stdin: Option<ChildStdin>,
+    /// Windows local channel: set on drop so the polling thread stops (there is no child process to end)
+    _stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+impl Drop for Chan {
+    fn drop(&mut self) {
+        if let Some(stop) = &self._stop {
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 }
 fn chans() -> &'static Mutex<HashMap<(String, String), Chan>> {
     static C: OnceLock<Mutex<HashMap<(String, String), Chan>>> = OnceLock::new();
@@ -187,21 +247,27 @@ fn channel(app: &AppHandle, label: &str, host: &str) -> Result<HookChannel, Stri
         return Ok(HookChannel { host: c.host.clone(), file: c.file.clone() });
     }
     let file = if host == "local" {
-        let dir = std::env::temp_dir().join(format!("ace-claude-hooks-{}", unsafe { libc::getuid() }));
+        let dir = std::env::temp_dir().join(format!("ace-claude-hooks-{}", crate::platform::user_tag()));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let _ = std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700));
+        let _ = crate::platform::set_mode(&dir, 0o700);
         dir.join(format!("{label}-{}.log", nonce())).to_string_lossy().into_owned()
     } else {
         ssh::acquire(label, host);
         format!("/tmp/ace-claude-hooks-{}.log", nonce())
     };
+    #[cfg(windows)]
+    {
+        if host == "local" {
+            return local_tail_channel(app, label, key, file);
+        }
+    }
     let (stdin, mut out, proc_id) = spawn_script(label, host, "claude-hooks", CHAN_SCRIPT, &file)?;
     let mut first = String::new();
     if out.read_line(&mut first).is_err() || first.trim() != "READY" {
         crate::procs::kill(proc_id);
         return Err(format!("could not start the hook listener on {host}"));
     }
-    chans().lock().unwrap().insert(key.clone(), Chan { file: file.clone(), host: host.to_string(), proc_id, _stdin: stdin });
+    chans().lock().unwrap().insert(key.clone(), Chan { file: file.clone(), host: host.to_string(), proc_id, _stdin: Some(stdin), _stop: None });
     let (app, label, host2) = (app.clone(), label.to_string(), host.to_string());
     std::thread::Builder::new()
         .name(format!("claude-hooks-{host2}"))
@@ -217,6 +283,93 @@ fn channel(app: &AppHandle, label: &str, host: &str) -> Result<HookChannel, Stri
         })
         .map_err(|e| e.to_string())?;
     Ok(HookChannel { host: host.to_string(), file })
+}
+
+/// Windows, local: the same channel without sh. This thread follows the file (see `Tailer`); dropping the `Chan` stops it.
+#[cfg(windows)]
+fn local_tail_channel(app: &AppHandle, label: &str, key: (String, String), file: String) -> Result<HookChannel, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    std::fs::write(&file, b"").map_err(|e| e.to_string())?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let (app, label, stop2, path) = (app.clone(), label.to_string(), stop.clone(), PathBuf::from(&file));
+    std::thread::Builder::new()
+        .name("claude-hooks-local".into())
+        .spawn(move || {
+            let mut t = Tailer::new(path);
+            while !stop2.load(Ordering::SeqCst) {
+                for line in t.poll() {
+                    if stop2.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    handle_hook_line(&app, &label, "local", &line);
+                }
+                std::thread::sleep(Duration::from_millis(TAIL_POLL_MS));
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    chans().lock().unwrap().insert(key, Chan { file: file.clone(), host: "local".into(), proc_id: 0, _stdin: None, _stop: Some(stop) });
+    Ok(HookChannel { host: "local".into(), file })
+}
+
+/// How often the Windows hook reader looks for appended bytes.
+#[cfg(any(windows, test))]
+const TAIL_POLL_MS: u64 = 150;
+
+/// Follows an append-only file like `tail -n +1 -F`, without a child process: `poll` returns the complete lines appended since the
+/// last call (a partial last line waits for its newline). Truncation (size below the read position) restarts at 0; a file that is
+/// gone (removed, or about to be recreated) restarts at 0 as well, so a recreated file is read from its start.
+#[cfg(any(windows, test))]
+struct Tailer {
+    path: PathBuf,
+    pos: u64,
+    partial: Vec<u8>,
+}
+
+#[cfg(any(windows, test))]
+impl Tailer {
+    fn new(path: PathBuf) -> Self {
+        Self { path, pos: 0, partial: Vec::new() }
+    }
+
+    fn restart(&mut self) {
+        self.pos = 0;
+        self.partial.clear();
+    }
+
+    fn poll(&mut self) -> Vec<String> {
+        let mut f = match std::fs::File::open(&self.path) {
+            Ok(f) => f,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    self.restart();
+                }
+                return vec![];
+            }
+        };
+        let Ok(len) = f.metadata().map(|m| m.len()) else { return vec![] };
+        if len < self.pos {
+            self.restart();
+        }
+        if len == self.pos || f.seek(SeekFrom::Start(self.pos)).is_err() {
+            return vec![];
+        }
+        let mut buf = Vec::new();
+        let Ok(n) = (&mut f).take(len - self.pos).read_to_end(&mut buf) else { return vec![] };
+        self.pos += n as u64;
+        self.partial.extend_from_slice(&buf);
+        let mut out = Vec::new();
+        while let Some(i) = self.partial.iter().position(|&b| b == b'\n') {
+            let rest = self.partial.split_off(i + 1);
+            let mut line = std::mem::replace(&mut self.partial, rest);
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            out.push(String::from_utf8_lossy(&line).into_owned());
+        }
+        out
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ transcript analysis
@@ -639,6 +792,57 @@ mod tests {
         assert!(wrap_command("ls", "local").is_none());
     }
 
+    #[test]
+    fn ace_studio_plugin_rides_along_for_local_sessions_only() {
+        // the dev tree has plugins/ace-studio with the built server (pnpm build:mcp); skip when it has not been built
+        let Some(dir) = plugin_dir() else { return };
+        assert!(std::path::Path::new(dir).join("server/ace-mcp.mjs").is_file());
+        let local = wrap_command("claude --resume abc", "local").unwrap();
+        assert!(local.contains(&format!(" --plugin-dir '{dir}' --resume abc")), "{local}");
+        assert!(!wrap_command("claude", "mc").unwrap().contains("--plugin-dir"));
+    }
+
+    #[test]
+    fn win_hook_command_is_one_encoded_powershell_line() {
+        use base64::Engine as _;
+        let c = win_hook_cmd();
+        assert!(c.starts_with("powershell -NoProfile -NonInteractive -EncodedCommand "), "{c}");
+        assert!(!c.contains('\n') && !c.contains('"') && !c.contains('\'') && !c.contains('$'), "{c}");
+        let b = base64::engine::general_purpose::STANDARD.decode(c.rsplit(' ').next().unwrap()).unwrap();
+        let units: Vec<u16> = b.chunks(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect();
+        let ps = String::from_utf16(&units).unwrap();
+        assert!(ps.contains("$env:ATELIER_HOOK_FILE") && ps.contains("$env:ATELIER_PANE") && ps.contains("UTF8Encoding $false"), "{ps}");
+        assert!(!ps.contains('\n'));
+    }
+
+    #[test]
+    fn tailer_follows_appends_truncation_and_recreation() {
+        let dir = std::env::temp_dir().join(format!("ace-tail-test-{}", nonce()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("c.log");
+        std::fs::write(&f, b"").unwrap();
+        let mut t = Tailer::new(f.clone());
+        assert!(t.poll().is_empty());
+        let app = |b: &[u8]| {
+            use std::io::Write;
+            std::fs::OpenOptions::new().append(true).create(true).open(&f).unwrap().write_all(b).unwrap();
+        };
+        app(b"p1 {\"a\":1}\np2 {\"b\"");
+        assert_eq!(t.poll(), vec!["p1 {\"a\":1}".to_string()]);
+        app(b":2}\r\n");
+        assert_eq!(t.poll(), vec!["p2 {\"b\":2}".to_string()]);
+        // truncated, then written again from the start
+        std::fs::write(&f, b"p3 x\n").unwrap();
+        assert_eq!(t.poll(), vec!["p3 x".to_string()]);
+        // removed, then recreated: read from its start
+        std::fs::remove_file(&f).unwrap();
+        assert!(t.poll().is_empty());
+        std::fs::write(&f, b"p4 y\np5 z\n").unwrap();
+        assert_eq!(t.poll(), vec!["p4 y".to_string(), "p5 z".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
     #[test]
     fn hook_command_appends_a_line() {
         let dir = std::env::temp_dir().join(format!("ace-hook-test-{}", nonce()));

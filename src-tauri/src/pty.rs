@@ -82,9 +82,13 @@ const BASH_RCFILE: &str = include_str!("shell_integration/bash_rcfile");
 
 /// Private directory with the shell-integration files (never the user's dotfiles). Rewritten when the content differs.
 fn integration_dir() -> Option<std::path::PathBuf> {
+    // zsh/bash only: no POSIX shell integration on Windows (a PowerShell integration can come later)
+    if cfg!(windows) {
+        return None;
+    }
     static D: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     D.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("atelier-shell-integration-v1-{}", unsafe { libc::getuid() }));
+        let dir = std::env::temp_dir().join(format!("atelier-shell-integration-v1-{}", crate::platform::user_tag()));
         let zsh = dir.join("zsh");
         std::fs::create_dir_all(&zsh).ok()?;
         for (path, body) in [(zsh.join(".zshenv"), ZSHENV), (zsh.join("atelier.zsh"), ZSH_INTEGRATION), (dir.join("bash_rcfile"), BASH_RCFILE)] {
@@ -97,18 +101,37 @@ fn integration_dir() -> Option<std::path::PathBuf> {
     .clone()
 }
 
+/// Default local shell. Windows: `pwsh.exe`, else `powershell.exe`, else `cmd.exe` (first one on PATH).
+fn default_shell() -> String {
+    #[cfg(windows)]
+    {
+        let on_path = |exe: &str| std::env::var_os("PATH").map(|p| std::env::split_paths(&p).any(|d| d.join(exe).is_file())).unwrap_or(false);
+        ["pwsh.exe", "powershell.exe"].into_iter().find(|e| on_path(e)).unwrap_or("cmd.exe").to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
+    }
+}
+
 fn build_command(o: &SpawnOpts) -> CommandBuilder {
     let mut cb;
     let integ = o.shell_integration.unwrap_or(true) && o.command.is_none();
     if o.host == "local" {
-        let shell = o.shell.clone().or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
-        let base = shell.rsplit('/').next().unwrap_or("").to_string();
+        let shell = o.shell.clone().unwrap_or_else(default_shell);
+        let base = shell.rsplit(&['/', '\\'][..]).next().unwrap_or("").to_string();
         let dir = if integ { integration_dir() } else { None };
         cb = CommandBuilder::new(&shell);
         match (&o.command, &dir) {
             (Some(c), _) => {
-                let wrapped = if o.hook_file.is_some() { crate::claude_hooks::wrap_command(c, "local") } else { None };
-                cb.args(["-lc", wrapped.as_deref().unwrap_or(c.as_str())]);
+                // hook wrapping is POSIX-quoted; Windows shells run the command as given
+                let wrapped = if o.hook_file.is_some() && !cfg!(windows) { crate::claude_hooks::wrap_command(c, "local") } else { None };
+                let c = wrapped.as_deref().unwrap_or(c.as_str());
+                if cfg!(windows) {
+                    cb.args(if base.eq_ignore_ascii_case("cmd.exe") { ["/C", c] } else { ["-Command", c] });
+                } else {
+                    cb.args(["-lc", c]);
+                }
             }
             (None, Some(d)) if base == "bash" => {
                 // bash ignores --rcfile for login shells, so the rcfile emulates the login profile itself.
@@ -119,7 +142,8 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
                 }
             }
             (None, d) => {
-                if o.login.unwrap_or(true) {
+                // `-l` is a POSIX login flag; pwsh/cmd do not take it
+                if o.login.unwrap_or(true) && !cfg!(windows) {
                     cb.arg("-l");
                 }
                 if let (Some(d), "zsh") = (d, base.as_str()) {
@@ -148,6 +172,9 @@ fn build_command(o: &SpawnOpts) -> CommandBuilder {
             cb.env("ATELIER_HOOK_FILE", f);
             cb.env("ATELIER_PANE", id);
             cb.env("ATELIER_CLAUDE_SETTINGS", crate::claude_hooks::settings_json());
+            if let Some(p) = crate::claude_hooks::plugin_dir() {
+                cb.env("ATELIER_CLAUDE_PLUGIN_DIR", p);
+            }
         }
     } else {
         use crate::remote::ssh::{command, login_wrap, quote};
@@ -339,13 +366,27 @@ pub fn pty_kill(id: String) {
     }
 }
 
+/// Process group leader of the terminal's foreground job (`tcgetpgrp`). Windows: no such thing, so None (callers fall back
+/// to the shell's own pid).
+fn foreground_group(master: &(dyn portable_pty::MasterPty + Send)) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        master.process_group_leader()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = master;
+        None
+    }
+}
+
 /// Is something other than the shell itself in the terminal's foreground (a running command)? Local ptys only; a remote
 /// shell sits behind `ssh`, so the frontend uses OSC 133 there.
 #[tauri::command]
 pub fn pty_busy(id: String) -> bool {
     let s = sessions().lock().unwrap();
     let Some(sess) = s.get(&id) else { return false };
-    match (sess.master.process_group_leader(), sess.pid) {
+    match (foreground_group(&*sess.master), sess.pid) {
         (Some(g), Some(p)) => g as u32 != p,
         _ => false,
     }
@@ -357,7 +398,7 @@ pub fn pty_cwd(id: String) -> Option<String> {
     let (leader, pid) = {
         let s = sessions().lock().unwrap();
         let sess = s.get(&id)?;
-        (sess.master.process_group_leader(), sess.pid)
+        (foreground_group(&*sess.master), sess.pid)
     };
     let pid = leader.or(pid.map(|p| p as i32))?;
     cwd_of(pid)

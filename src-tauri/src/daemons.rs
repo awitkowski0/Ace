@@ -1,5 +1,6 @@
 //! Processes & Daemons tool window backend: gradle/kotlin/JVM/LSP/claude scan, stop, cleanup.
 //! Local (sysinfo + one batched lsof) and ssh hosts (one round trip reading /proc). Owned by the daemons agent.
+use crate::platform::{self, Sig};
 use crate::procs;
 use crate::remote::ssh;
 use serde::Serialize;
@@ -75,7 +76,7 @@ const MC_JAR_HINTS: &[&str] = &["minecraft", "fabric-server", "fabric-launcher",
 /// "Minecraft server (jar)" when the command line looks like a Minecraft server JVM (jar name / main class / aikar flags).
 pub fn minecraft_label(cmd: &[String]) -> Option<String> {
     let joined = cmd.join(" ");
-    let jar = cmd.iter().position(|a| a == "-jar").and_then(|i| cmd.get(i + 1)).map(|j| j.rsplit('/').next().unwrap_or(j).to_string());
+    let jar = cmd.iter().position(|a| a == "-jar").and_then(|i| cmd.get(i + 1)).map(|j| file_base(j).to_string());
     let by_main = MC_MAINS.iter().any(|m| joined.contains(m));
     let by_jar = jar.as_deref().map(|j| { let l = j.to_lowercase(); MC_JAR_HINTS.iter().any(|h| l.contains(h)) }).unwrap_or(false);
     let by_flags = joined.contains("-Dusing.aikars.flags") || joined.contains("-Daikars.new.flags");
@@ -86,10 +87,25 @@ pub fn minecraft_label(cmd: &[String]) -> Option<String> {
     }
 }
 
+/// The last path component, split on both `/` and `\\` (a Windows jar path such as `C:\\srv\\server.jar`).
+fn file_base(p: &str) -> &str {
+    p.rsplit(['/', '\\']).next().unwrap_or(p)
+}
+
+/// Executable base name without its directory; on Windows also without `.exe` (`C:\\jdk\\bin\\java.exe` -> `java`).
+fn exe_base(s: &str) -> &str {
+    let b = s.rsplit('/').next().unwrap_or(s);
+    if !cfg!(windows) {
+        return b;
+    }
+    let b = b.rsplit('\\').next().unwrap_or(b);
+    if b.len() >= 4 && b[b.len() - 4..].eq_ignore_ascii_case(".exe") { &b[..b.len() - 4] } else { b }
+}
+
 pub fn classify(name: &str, cmd: &[String]) -> Option<(&'static str, Option<String>, String)> {
     let joined = cmd.join(" ");
-    let exe = cmd.first().map(|s| s.rsplit('/').next().unwrap_or(s)).unwrap_or(name);
-    let is_java = name == "java" || exe == "java";
+    let exe = cmd.first().map(|s| exe_base(s)).unwrap_or(name);
+    let is_java = exe_base(name) == "java" || exe == "java";
     if is_java {
         if let Some(i) = cmd.iter().position(|a| a == GRADLE_MAIN) {
             let ver = cmd.get(i + 1).filter(|v| v.chars().next().map_or(false, |c| c.is_ascii_digit())).cloned().or_else(|| version_in(&joined, "gradle-"));
@@ -106,7 +122,7 @@ pub fn classify(name: &str, cmd: &[String]) -> Option<(&'static str, Option<Stri
             return Some(("minecraft", None, label));
         }
         let label = if let Some(i) = cmd.iter().position(|a| a == "-jar") {
-            cmd.get(i + 1).map(|j| j.rsplit('/').next().unwrap_or(j).to_string())
+            cmd.get(i + 1).map(|j| file_base(j).to_string())
         } else {
             // first non-option arg after the java binary (skip -cp value)
             let mut it = cmd.iter().skip(1);
@@ -210,7 +226,10 @@ fn lsof_cwds(pids: &[u32]) -> HashMap<u32, String> {
         return m;
     }
     let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
-    let Ok(out) = Command::new("lsof").args(["-a", "-d", "cwd", "-p", &list, "-Fpn"]).stdin(Stdio::null()).output() else {
+    let mut c = Command::new("lsof");
+    c.args(["-a", "-d", "cwd", "-p", &list, "-Fpn"]).stdin(Stdio::null());
+    platform::no_window(&mut c); // no lsof on Windows: the cwd column stays empty
+    let Ok(out) = c.output() else {
         return m;
     };
     let mut cur = 0u32;
@@ -306,7 +325,7 @@ fn summary_local() -> Vec<(u32, &'static str, Option<String>, u64)> {
     let mut v = vec![];
     for (pid, p) in sys.processes() {
         let name = p.name().to_string_lossy();
-        if name != "java" {
+        if exe_base(&name) != "java" {
             continue;
         }
         let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
@@ -473,7 +492,14 @@ fn kill_cmd(host: &str, sig: &str, pids: &[u32]) -> Result<(), String> {
         return Ok(());
     }
     if is_local(host) {
-        Command::new("kill").arg(format!("-{sig}")).args(&list).stderr(Stdio::null()).status().map_err(|e| e.to_string())?;
+        let sig = match sig {
+            "KILL" => Sig::Kill,
+            "TERM" => Sig::Term,
+            other => return Err(format!("unsupported signal {other}")),
+        };
+        for p in pids.iter().filter(|p| **p > 1) {
+            platform::signal_pid(*p, sig);
+        }
         Ok(())
     } else {
         ssh::exec(host, &format!("kill -{sig} {} 2>/dev/null; true", list.join(" "))).map(|_| ())
@@ -489,7 +515,7 @@ fn terminate(host: &str, pids: &[u32]) -> Result<(), String> {
     if is_local(host) {
         kill_cmd(host, "TERM", &pids)?;
         let t = Instant::now();
-        let alive = |p: &u32| Command::new("kill").args(["-0", &p.to_string()]).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+        let alive = |p: &u32| platform::alive(*p);
         while t.elapsed() < Duration::from_secs(5) {
             if !pids.iter().any(alive) {
                 return Ok(());
@@ -528,12 +554,13 @@ fn check_confirm(host: &str, pid: u32, confirm_pid: Option<u32>) -> Result<(), S
 pub fn find_gradle_bin(home: &Path, ver: &str) -> Option<PathBuf> {
     let dists = home.join(".gradle/wrapper/dists");
     let prefix = format!("gradle-{ver}-");
+    let bin = if cfg!(windows) { "gradle.bat" } else { "gradle" };
     for e in std::fs::read_dir(dists).ok()?.flatten() {
         if !e.file_name().to_string_lossy().starts_with(&prefix) {
             continue;
         }
         for h in std::fs::read_dir(e.path()).ok()?.flatten() {
-            let b = h.path().join(format!("gradle-{ver}/bin/gradle"));
+            let b = h.path().join(format!("gradle-{ver}/bin/{bin}"));
             if b.is_file() {
                 return Some(b);
             }
@@ -560,8 +587,16 @@ fn gradle_stop(host: &str, ver: &str) -> Result<bool, String> {
     if is_local(host) {
         let Some(home) = dirs::home_dir() else { return Ok(false) };
         let Some(bin) = find_gradle_bin(&home, ver) else { return Ok(false) };
-        let cmd = local_stop_cmd(&bin);
-        let out = Command::new("/bin/zsh").args(["-lc", &cmd]).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+        let out = if cfg!(windows) {
+            // gradle.bat runs directly (no shell)
+            let mut c = Command::new(&bin);
+            c.arg("--stop").stdin(Stdio::null());
+            platform::no_window(&mut c);
+            c.output().map_err(|e| e.to_string())?
+        } else {
+            let cmd = local_stop_cmd(&bin);
+            Command::new("/bin/zsh").args(["-lc", &cmd]).stdin(Stdio::null()).output().map_err(|e| e.to_string())?
+        };
         if out.status.success() { Ok(true) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
     } else {
         let s = remote_stop_script(ver);
@@ -771,7 +806,6 @@ fn classify_clean(raw: &RawLayout, running: &HashSet<String>) -> Vec<CleanItem> 
 
 /// Size on disk (allocated blocks) of a tree; symlinks not followed.
 pub fn dir_size(p: &Path, cancel: &AtomicBool) -> u64 {
-    use std::os::unix::fs::MetadataExt;
     let mut total = 0u64;
     let mut stack = vec![p.to_path_buf()];
     while let Some(d) = stack.pop() {
@@ -779,7 +813,7 @@ pub fn dir_size(p: &Path, cancel: &AtomicBool) -> u64 {
             return total;
         }
         let Ok(md) = std::fs::symlink_metadata(&d) else { continue };
-        total += md.blocks() * 512;
+        total += platform::allocated_bytes(&md);
         if md.is_dir() {
             if let Ok(rd) = std::fs::read_dir(&d) {
                 for e in rd.flatten() {
@@ -1053,6 +1087,11 @@ mod tests {
         assert_eq!(classify("java", &s(&["java", "net.minecraft.server.Main"])).unwrap().0, "minecraft");
         assert_eq!(classify("java", &s(&["java", "-jar", "paper-1.21.jar"])).unwrap().0, "minecraft");
         assert_eq!(classify("java", &s(&["java", "-jar", "app.jar"])).unwrap().0, "java");
+        // Windows-style jar paths: the label is the file name, split on both separators
+        assert_eq!(file_base("C:\\srv\\app.jar"), "app.jar");
+        assert_eq!(file_base("/srv/app.jar"), "app.jar");
+        assert_eq!(classify("java", &s(&["java", "-jar", "C:\\srv\\app.jar"])).unwrap().2, "app.jar");
+        assert_eq!(minecraft_label(&s(&["java", "-jar", "C:\\mc\\paper-1.21.jar"])).unwrap(), "Minecraft server (paper-1.21.jar)");
         // guard bookkeeping
         state().lock().unwrap().guarded.insert(("mc".into(), 4242));
         assert!(is_guarded("mc", 4242) && !is_guarded("mc", 1) && !is_guarded("local", 4242));

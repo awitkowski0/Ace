@@ -1,0 +1,9 @@
+{
+  "name": "ace-studio",
+  "displayName": "Ace Studio",
+  "version": "0.1.0",
+  "description": "Edit Minecraft geo / animation / bbmodel assets with byte-faithful tools, validate Thematic spidey clips, screenshot the live Ace Studio, and commit assets safely.",
+  "author": { "name": "Ace" },
+  "license": "UNLICENSED",
+  "keywords": ["animation", "geckolib", "bedrock", "blockbench", "ace", "thematic"]
+}

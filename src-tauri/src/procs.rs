@@ -14,6 +14,7 @@
 //!  * Every tracked pid is recorded (pid + process start time) in `<data dir>/procs/<owner pid>.json`; on the next
 //!    launch, leftovers of dead owners are reaped, but only when pid AND start time still match (pid reuse safe).
 #![allow(dead_code)]
+use crate::platform::{self, Sig};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::process::Child;
@@ -153,8 +154,8 @@ fn kill_entries(mut entries: Vec<Entry>) {
         }
     }
     for (pid, leader) in &targets {
-        signal(*pid, *leader, libc::SIGCONT); // a SIGSTOPped process (paused headless Godot) would never act on SIGTERM
-        signal(*pid, *leader, libc::SIGTERM);
+        signal(*pid, *leader, Sig::Cont); // a SIGSTOPped process (paused headless Godot) would never act on SIGTERM
+        signal(*pid, *leader, Sig::Term);
     }
     let reap = |entries: &mut Vec<Entry>| {
         for e in entries.iter_mut() {
@@ -173,7 +174,7 @@ fn kill_entries(mut entries: Vec<Entry>) {
     }
     for (pid, leader) in &targets {
         if alive(*pid) {
-            signal(*pid, *leader, libc::SIGKILL);
+            signal(*pid, *leader, Sig::Kill);
         }
     }
     for e in entries.iter_mut() {
@@ -185,24 +186,18 @@ fn kill_entries(mut entries: Vec<Entry>) {
 }
 
 fn alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
-}
-
-fn own_pgid() -> i32 {
-    unsafe { libc::getpgrp() }
+    platform::alive(pid)
 }
 
 /// Signal a pid; if it leads its own process group (and it is not ours) signal the whole group.
-fn signal(pid: u32, leader: bool, sig: i32) {
+fn signal(pid: u32, leader: bool, sig: Sig) {
     if pid <= 1 || pid == std::process::id() {
         return;
     }
-    unsafe {
-        if leader && pid as i32 != own_pgid() {
-            libc::killpg(pid as i32, sig);
-        }
-        libc::kill(pid as i32, sig);
+    if leader && pid != platform::own_group() {
+        platform::signal_group(pid, sig);
     }
+    platform::signal_pid(pid, sig);
 }
 
 /// Command-line fragments of shared build daemons. They are NEVER signalled by a window close / Stop: a Gradle client that just
@@ -237,11 +232,29 @@ fn parse_ps_line(l: &str) -> Option<Pi> {
     Some(Pi { pid, ppid, pgid, cmd: r.trim().to_string() })
 }
 
+#[cfg(unix)]
 fn process_table_full() -> Vec<Pi> {
     let Ok(o) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,ppid=,pgid=,command="]).stdin(std::process::Stdio::null()).output() else {
         return vec![];
     };
     String::from_utf8_lossy(&o.stdout).lines().filter_map(parse_ps_line).collect()
+}
+
+/// Windows has no `ps` and no process groups: the table comes from sysinfo, with pgid 0 (so no member counts as a group leader).
+#[cfg(windows)]
+fn process_table_full() -> Vec<Pi> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::everything());
+    sys.processes()
+        .iter()
+        .map(|(pid, p)| Pi {
+            pid: pid.as_u32(),
+            ppid: p.parent().map(|x| x.as_u32()).unwrap_or(0),
+            pgid: 0,
+            cmd: p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" "),
+        })
+        .collect()
 }
 
 /// Pids that must survive: every protected daemon and everything below it (workers, forked JVMs).
@@ -274,7 +287,7 @@ fn collect_tree(root: u32, out: &mut Vec<(u32, bool)>) {
         if out.iter().any(|(q, _)| *q == p) || prot.contains(&p) {
             continue;
         }
-        let leader = unsafe { libc::getpgid(p as i32) } == p as i32;
+        let leader = platform::is_group_leader(p);
         let group_has_protected = leader && table.iter().any(|q| q.pgid == p && prot.contains(&q.pid));
         if group_has_protected {
             // no killpg: the daemon shares the group. Take the unprotected members one by one.
@@ -303,7 +316,7 @@ pub fn kill_marked(markers: &[String], grace: std::time::Duration) -> Vec<u32> {
         .map(|p| p.pid)
         .collect();
     for p in &hit {
-        signal(*p, false, libc::SIGTERM);
+        signal(*p, false, Sig::Term);
     }
     let deadline = std::time::Instant::now() + grace;
     while hit.iter().any(|p| alive(*p)) && std::time::Instant::now() < deadline {
@@ -311,7 +324,7 @@ pub fn kill_marked(markers: &[String], grace: std::time::Duration) -> Vec<u32> {
     }
     for p in &hit {
         if alive(*p) {
-            signal(*p, false, libc::SIGKILL);
+            signal(*p, false, Sig::Kill);
         }
     }
     hit
@@ -320,8 +333,7 @@ pub fn kill_marked(markers: &[String], grace: std::time::Duration) -> Vec<u32> {
 /// Call before `spawn()`: the child becomes the leader of a new process group, so the group can be killed as a unit
 /// (grandchildren included) and terminal job-control signals no longer reach it.
 pub fn group(cmd: &mut std::process::Command) -> &mut std::process::Command {
-    use std::os::unix::process::CommandExt;
-    cmd.process_group(0)
+    platform::new_group(cmd)
 }
 
 /// Process start time in microseconds since epoch (identity token that survives pid reuse).
@@ -337,7 +349,15 @@ fn proc_start(pid: u32) -> Option<u64> {
         Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn proc_start(pid: u32) -> Option<u64> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let p = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
+    sys.process(p).map(|pr| pr.start_time() * 1_000_000)
+}
+#[cfg(not(any(target_os = "macos", windows)))]
 fn proc_start(_pid: u32) -> Option<u64> {
     None
 }
@@ -421,12 +441,12 @@ pub fn reap_stale() -> usize {
             }
         }
         for (p, l) in &targets {
-            signal(*p, *l, libc::SIGTERM);
+            signal(*p, *l, Sig::Term);
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
         for (p, l) in &targets {
             if alive(*p) {
-                signal(*p, *l, libc::SIGKILL);
+                signal(*p, *l, Sig::Kill);
             }
         }
         let _ = std::fs::remove_file(&path);
@@ -436,6 +456,16 @@ pub fn reap_stale() -> usize {
 
 /// Install once at startup: signal handlers + stale-child reaper (off the main thread).
 pub fn install() {
+    #[cfg(unix)]
+    install_signals();
+    let _ = std::thread::Builder::new().name("procs-reaper".into()).spawn(|| {
+        reap_stale();
+    });
+}
+
+/// SIGTERM/SIGINT/SIGHUP -> kill everything, then exit. Windows has no such signals here: the app's own exit path does the cleanup.
+#[cfg(unix)]
+fn install_signals() {
     use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
     if let Ok(mut sigs) = signal_hook::iterator::Signals::new([SIGTERM, SIGINT, SIGHUP]) {
         let _ = std::thread::Builder::new().name("procs-signals".into()).spawn(move || {
@@ -455,9 +485,6 @@ pub fn install() {
             }
         });
     }
-    let _ = std::thread::Builder::new().name("procs-reaper".into()).spawn(|| {
-        reap_stale();
-    });
 }
 
 /// Pid of a registered process (None once unregistered / killed).

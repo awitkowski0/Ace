@@ -11,7 +11,6 @@ pub async fn remote_list_dir(loc: Location) -> Result<Vec<ops::RichEntry>, Strin
         if !loc.is_local() {
             return ops::list_rich(&loc.host, &loc.path);
         }
-        use std::os::unix::fs::PermissionsExt;
         let mut v = Vec::new();
         for ent in std::fs::read_dir(&loc.path).map_err(|e| format!("{}: {e}", loc.path))?.flatten() {
             let p = ent.path();
@@ -25,7 +24,7 @@ pub async fn remote_list_dir(loc: Location) -> Result<Vec<ops::RichEntry>, Strin
                 is_symlink: l.map(|l| l.file_type().is_symlink()).unwrap_or(false),
                 size: m.len(),
                 modified: m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
-                mode: m.permissions().mode() & 0o7777,
+                mode: crate::platform::mode(&m.permissions()) & 0o7777,
             });
         }
         v.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
@@ -48,6 +47,9 @@ pub async fn remote_chmod(loc: Location, mode: String, recursive: bool) -> Resul
     }
     tauri::async_runtime::spawn_blocking(move || {
         if loc.is_local() {
+            if cfg!(windows) {
+                return Err("chmod is not available for local files on Windows".into());
+            }
             let mut c = std::process::Command::new("chmod");
             if recursive { c.arg("-R"); }
             let o = c.arg(&mode).arg("--").arg(&loc.path).output().map_err(|e| e.to_string())?;

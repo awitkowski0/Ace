@@ -21,7 +21,10 @@ export const setActiveEditorGroup = (id: string) => (activeGroupId = id);
 /** Set by EditorArea: true while the active group shows a viewer tab (image, audio ...), whose hidden Monaco must not receive editor actions. */
 let viewerInFront: () => boolean = () => false;
 export const setViewerInFront = (f: () => boolean) => { viewerInFront = f; };
-export const activeEditor = () => (viewerInFront() ? undefined : (activeGroupId ? editors.get(activeGroupId) : undefined) ?? [...editors.values()][0]);
+/** == animstudio hook: while a Studio pane has focus the (hidden) Monaco editor must not receive editor actions (⌘D etc.). */
+const suppressors = new Set<() => boolean>();
+export const suppressEditorWhen = (f: () => boolean) => { suppressors.add(f); return () => { suppressors.delete(f); }; };
+export const activeEditor = () => (viewerInFront() || [...suppressors].some((f) => f()) ? undefined : (activeGroupId ? editors.get(activeGroupId) : undefined) ?? [...editors.values()][0]);
 export const focusEditor = () => activeEditor()?.focus();
 /** Run a Monaco built-in command on the active editor (e.g. "editor.action.deleteLines"). */
 export const triggerEditor = (id: string) => {

@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../../lib/store";
 import { CloseIcon } from "../shell/icons";
@@ -94,8 +95,8 @@ export function RunPanel() {
       </div>
       <div className="run-main">
         <div className="run-vbar">
-          <button className="icon-btn sm" title="Rerun (⌘R)" data-act="rerun" onClick={() => void rerunSession(s)}><RerunIcon /></button>
-          <button className="icon-btn sm" title="Stop (⌘F2)" data-act="stop" disabled={s.status === "finished"} onClick={() => stopSession(s)}><StopIcon /></button>
+          <button className="icon-btn sm" title={`Rerun (${formatShortcut("⌘R")})`} data-act="rerun" onClick={() => void rerunSession(s)}><RerunIcon /></button>
+          <button className="icon-btn sm" title={`Stop (${formatShortcut("⌘F2")})`} data-act="stop" disabled={s.status === "finished"} onClick={() => stopSession(s)}><StopIcon /></button>
           <span className="run-vsep" />
           <button className={"icon-btn sm" + (v.follow ? " on" : "")} title="Scroll to the End" data-act="scroll-end" onClick={() => { v.follow = true; rerender(); }}><ScrollEndIcon /></button>
           <button className={"icon-btn sm" + (v.wrap ? " on" : "")} title="Soft-Wrap" data-act="soft-wrap" onClick={() => { v.wrap = !v.wrap; rerender(); }}><WrapIcon /></button>

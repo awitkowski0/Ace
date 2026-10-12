@@ -18,6 +18,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, WebviewWindow};
 
+#[cfg(not(windows))]
 const MAC_APP: &str = "/Applications/Godot.app/Contents/MacOS/Godot";
 
 #[derive(Serialize)]
@@ -28,8 +29,24 @@ pub struct GodotBin {
 }
 
 fn is_exec(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    p.is_file() && p.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    p.is_file() && p.metadata().map(|m| crate::platform::is_executable(p, &m)).unwrap_or(false)
+}
+
+/// Editor binaries to try after PATH: the usual install locations of each platform.
+#[cfg(windows)]
+fn known_locations() -> Vec<std::path::PathBuf> {
+    let mut v = Vec::new();
+    if let Ok(d) = std::env::var("ProgramFiles") {
+        v.push(Path::new(&d).join("Godot").join("Godot.exe"));
+    }
+    if let Ok(d) = std::env::var("LOCALAPPDATA") {
+        v.push(Path::new(&d).join("Programs").join("Godot").join("Godot.exe"));
+    }
+    v
+}
+#[cfg(not(windows))]
+fn known_locations() -> Vec<std::path::PathBuf> {
+    ["/opt/homebrew/bin/godot", "/usr/local/bin/godot", MAC_APP].iter().map(Into::into).collect()
 }
 
 pub fn find_godot(configured: Option<&str>) -> Option<GodotBin> {
@@ -40,15 +57,18 @@ pub fn find_godot(configured: Option<&str>) -> Option<GodotBin> {
         }
         return None;
     }
-    for dir in crate::lsp::login_path().split(':').filter(|d| !d.is_empty()) {
-        let p = Path::new(dir).join("godot");
-        if is_exec(&p) {
-            return Some(GodotBin { path: p.to_string_lossy().into_owned(), source: "PATH".into() });
+    let names: &[&str] = if cfg!(windows) { &["Godot.exe", "godot.exe"] } else { &["godot"] };
+    for dir in std::env::split_paths(crate::lsp::login_path()).filter(|d| !d.as_os_str().is_empty()) {
+        for name in names {
+            let p = dir.join(name);
+            if is_exec(&p) {
+                return Some(GodotBin { path: p.to_string_lossy().into_owned(), source: "PATH".into() });
+            }
         }
     }
-    for p in ["/opt/homebrew/bin/godot", "/usr/local/bin/godot", MAC_APP] {
-        if is_exec(Path::new(p)) {
-            return Some(GodotBin { path: p.into(), source: "known location".into() });
+    for p in known_locations() {
+        if is_exec(&p) {
+            return Some(GodotBin { path: p.to_string_lossy().into_owned(), source: "known location".into() });
         }
     }
     None
@@ -373,9 +393,9 @@ pub fn godot_open_editor(project: String, scene: Option<String>, godot: Option<S
             return Ok(argv);
         }
     }
-    use std::os::unix::process::CommandExt;
     let mut cmd = std::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..]).current_dir(&project).process_group(0).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    crate::platform::new_group(&mut cmd);
+    cmd.args(&argv[1..]).current_dir(&project).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
         let _ = child.wait();

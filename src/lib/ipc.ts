@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EventCallback, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { toPosixPath } from "./paths";
 
 export { invoke };
 export type { UnlistenFn };
@@ -48,15 +49,19 @@ export const local = (path: string): Location => ({ host: "local", path });
 export const locKey = (l: Location) => `${l.host}:${l.path}`;
 export const sameLoc = (a: Location, b: Location) => a.host === b.host && a.path === b.path;
 
-export const dirname = (p: string) => {
-  const i = p.lastIndexOf("/");
-  return i <= 0 ? "/" : p.slice(0, i);
-};
-export const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
-export const joinPath = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
+export { dirname, basename, joinPath } from "./paths";
+
+/**
+ * Windows decision: local paths are normalised to forward slashes at this boundary ("C:\\Users\\x" -> "C:/Users/x")
+ * for everything the backend hands to the UI (directory listings, home, launch location, watch events). Rust accepts
+ * forward slashes on Windows, and the UI helpers in ./paths accept both, so either form works. Mac paths have no drive
+ * letter and pass through untouched.
+ */
+const posixLoc = (l: Location): Location => (l.host === "local" ? { ...l, path: toPosixPath(l.path) } : l);
 
 export const fs = {
-  listDir: (loc: Location) => invoke<DirEntry[]>("fs_list_dir", { loc }),
+  listDir: async (loc: Location) =>
+    (await invoke<DirEntry[]>("fs_list_dir", { loc })).map((e) => ({ ...e, path: toPosixPath(e.path) })),
   readFile: (loc: Location) => invoke<string>("fs_read_file", { loc }),
   /** raw bytes (ArrayBuffer, no base64); optional [offset, offset+len) range */
   readBytes: (loc: Location, offset?: number, len?: number) => invoke<ArrayBuffer>("fs_read_bytes", { loc, offset, len }),
@@ -65,11 +70,19 @@ export const fs = {
   writeFile: (loc: Location, contents: string) => invoke<void>("fs_write_file", { loc, contents }),
   stat: (loc: Location) => invoke<FileStat>("fs_stat", { loc }),
   rename: (from: Location, to: Location) => invoke<void>("fs_rename", { from, to }),
+  /** recursive copy, same host, never overwrites */
+  copy: (from: Location, to: Location) => invoke<void>("fs_copy", { from, to }),
   delete: (loc: Location) => invoke<void>("fs_delete", { loc }),
+  /** local only: move to the Trash */
+  trash: (paths: string[]) => invoke<void>("fs_trash", { paths }),
   createDir: (loc: Location) => invoke<void>("fs_create_dir", { loc }),
-  home: () => invoke<string>("fs_home"),
-  launchLocation: () => invoke<Location | null>("launch_location"),
+  home: async () => toPosixPath(await invoke<string>("fs_home")),
+  launchLocation: async () => {
+    const l = await invoke<Location | null>("launch_location");
+    return l && posixLoc(l);
+  },
   watch: (loc: Location) => invoke<void>("fs_watch", { loc }),
   unwatch: (loc: Location) => invoke<void>("fs_unwatch", { loc }),
-  onChanged: (cb: (e: FsChanged) => void) => listen<FsChanged>("fs://changed", (e) => cb(e.payload)),
+  onChanged: (cb: (e: FsChanged) => void) =>
+    listen<FsChanged>("fs://changed", (e) => cb({ ...e.payload, root: toPosixPath(e.payload.root), paths: e.payload.paths.map(toPosixPath) })),
 };

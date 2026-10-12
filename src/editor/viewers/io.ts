@@ -1,5 +1,5 @@
+import { dirname, fs, joinPath, type Location } from "../../lib/ipc";
 import { useEffect, useState } from "react";
-import { fs, type Location } from "../../lib/ipc";
 import { createStore, useStore } from "../../lib/store";
 import type { Doc } from "../store";
 import type { DualMode } from "./registry";
@@ -35,7 +35,7 @@ export function useBlobUrl(data: ArrayBuffer | undefined, type: string) {
 
 export const siblingOf = (loc: Location, name: string): Location => ({
   host: loc.host,
-  path: loc.path.slice(0, loc.path.lastIndexOf("/") + 1) + name,
+  path: joinPath(dirname(loc.path), name),
 });
 
 export const mimeOf = (ext: string): string =>

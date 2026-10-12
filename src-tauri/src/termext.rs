@@ -63,6 +63,10 @@ fn pasteboard() -> objc2::rc::Retained<objc2_app_kit::NSPasteboard> {
     }
 }
 
+/// Windows clipboard under ATELIER_AUTOMATION: a process-private slot, so QA never touches the real clipboard.
+#[cfg(windows)]
+static QA_TEXT: parking_lot::Mutex<String> = parking_lot::Mutex::new(String::new());
+
 #[tauri::command]
 pub fn clipboard_write(text: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -76,8 +80,20 @@ pub fn clipboard_write(text: String) -> Result<(), String> {
         }
         return Err("pasteboard write failed".into());
     }
+    #[cfg(windows)]
+    {
+        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+            *QA_TEXT.lock() = text;
+            return Ok(());
+        }
+        // The text goes over stdin as UTF-8: no argv or env size limit, no quoting. Set-Clipboard keeps Unicode intact.
+        return crate::files::powershell("Set-Clipboard -Value (In-Utf8)", &[], Some(&text)).map(|_| ());
+    }
     #[allow(unreachable_code)]
-    Err("clipboard unsupported".into())
+    {
+        let _ = text;
+        Err("clipboard unsupported".into())
+    }
 }
 
 #[tauri::command]
@@ -86,6 +102,14 @@ pub fn clipboard_read() -> String {
     {
         use objc2_app_kit::NSPasteboardTypeString;
         return unsafe { pasteboard().stringForType(NSPasteboardTypeString) }.map(|s| s.to_string()).unwrap_or_default();
+    }
+    #[cfg(windows)]
+    {
+        if std::env::var_os("ATELIER_AUTOMATION").is_some() {
+            return QA_TEXT.lock().clone();
+        }
+        // Empty when the clipboard holds no text (an image, or files): Get-Clipboard -Raw returns nothing then.
+        return crate::files::powershell("$t=Get-Clipboard -Raw; if($t -ne $null){ Out-Utf8 ([string]$t) }", &[], None).unwrap_or_default();
     }
     #[allow(unreachable_code)]
     String::new()
@@ -113,5 +137,8 @@ pub fn secure_keyboard_entry(enable: bool) -> bool {
         return IsSecureEventInputEnabled() != 0;
     }
     #[allow(unreachable_code)]
-    false
+    {
+        let _ = enable;
+        false
+    }
 }

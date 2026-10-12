@@ -32,9 +32,10 @@ const MarkdownPreview = L(() => import("./MarkdownPreview"));
 const CsvTable = L(() => import("./CsvTable"));
 const BbmodelView = L(() => import("./BbmodelView"));
 const McmetaPreview = L(() => import("./McmetaPreview"));
+const StudioView = L(() => import("../../components/animstudio/ui/StudioView"));
 
 export const DUAL_PREVIEWS: Record<DualId, ComponentType<ViewerProps & { text: string; sync: boolean }>> = {
-  svg: SvgPreview, markdown: MarkdownPreview, csv: CsvTable, bbmodel: BbmodelView, mcmeta: McmetaPreview,
+  svg: SvgPreview, markdown: MarkdownPreview, csv: CsvTable, bbmodel: BbmodelView, mcmeta: McmetaPreview, animstudio: StudioView,
 };
 
 export function DualPreview({ doc, groupId, text, sync }: { doc: Doc; groupId: string; text: string; sync: boolean }) {

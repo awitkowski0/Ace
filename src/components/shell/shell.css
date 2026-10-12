@@ -18,3 +18,14 @@
 .stripe-badge { position: absolute; top: 1px; right: 1px; }
 .tw-badge { display: inline-block; margin-left: 6px; }
 .stripe-badge.question, .tw-badge.question { background: var(--nord12); }
+
+/* Speed search (IntelliJ): popup pinned at the top edge of the tree, matched fragments highlighted. See shell/speedSearch.tsx */
+.ss-host { position: relative; height: 100%; min-height: 0; min-width: 0; }
+.ss-popup { position: absolute; top: 4px; left: 8px; z-index: 6; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 24px);
+  height: 24px; padding: 0 8px; border-radius: 6px; background: var(--bg-popup); border: 1px solid var(--border-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .35); font-size: 12px; color: var(--fg-dim); pointer-events: none; white-space: nowrap; }
+.ss-popup .ss-query { color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.ss-popup.nomatch { border-color: var(--nord11); background: color-mix(in srgb, var(--nord11) 22%, var(--bg-popup)); }
+.ss-popup.nomatch .ss-query { color: var(--nord11); }
+mark.ss-hit { background: rgba(235, 203, 139, .32); color: inherit; border-radius: 2px; box-shadow: 0 0 0 1px rgba(235, 203, 139, .5); }
+.selected mark.ss-hit { background: rgba(235, 203, 139, .5); box-shadow: 0 0 0 1px rgba(235, 203, 139, .75); }

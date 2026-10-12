@@ -43,6 +43,8 @@ pub trait FsBackend: Send + Sync {
     fn rename(&self, from: &str, to: &str) -> FsResult<()>;
     fn delete(&self, path: &str) -> FsResult<()>;
     fn create_dir(&self, path: &str) -> FsResult<()>;
+    /// Recursive copy; never overwrites (errors when `to` exists).
+    fn copy(&self, from: &str, to: &str) -> FsResult<()>;
 }
 
 /// Pick a backend for a host. The remote agent replaces `remote::RemoteBackend` internals.
@@ -76,6 +78,13 @@ pub async fn fs_rename(from: Location, to: Location) -> FsResult<()> {
         return Err("rename across hosts not supported".into());
     }
     backend_for(&from.host).rename(&from.path, &to.path)
+}
+#[tauri::command]
+pub async fn fs_copy(from: Location, to: Location) -> FsResult<()> {
+    if from.host != to.host {
+        return Err("copy across hosts not supported".into());
+    }
+    backend_for(&from.host).copy(&from.path, &to.path)
 }
 #[tauri::command]
 pub async fn fs_delete(loc: Location) -> FsResult<()> {

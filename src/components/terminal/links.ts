@@ -1,4 +1,5 @@
 /** File-path link detection for terminal output (`src/foo.ts:12:3`, `res://a/b.gd:40`, Python tracebacks, ...). */
+import { isMod } from "../../lib/platform";
 import type { IBuffer, IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { fs, type Location } from "../../lib/ipc";
 
@@ -112,7 +113,7 @@ export function filePathLinks(term: Terminal, ctx: LinkCtx): ILinkProvider {
             range: { start: { x: sx + 1, y }, end: { x: ex + 1, y } },
             text: f.text,
             decorations: { underline: true, pointerCursor: true },
-            activate: (e) => { if (e.metaKey) ctx.open(loc, f.line, f.col); },
+            activate: (e) => { if (isMod(e)) ctx.open(loc, f.line, f.col); },
           });
         }
         cb(links.length ? links : undefined);

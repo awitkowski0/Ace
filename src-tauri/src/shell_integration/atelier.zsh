@@ -37,7 +37,8 @@ if [[ -o interactive && -n "$ATELIER_SHELL_INTEGRATION" && -z "$__atelier_loaded
       function claude {
         case "${1-}" in agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|setup-token|stop|kill|ultrareview|update|upgrade) command claude "$@"; return;; esac
         local a; for a in "$@"; do case "$a" in -p|--print|-h|--help|-v|--version|--bg) command claude "$@"; return;; esac; done
-        command "${ATELIER_CLAUDE_BIN:-claude}" --settings "$ATELIER_CLAUDE_SETTINGS" "$@"
+        local -a __pd; [[ -n "$ATELIER_CLAUDE_PLUGIN_DIR" ]] && __pd=(--plugin-dir "$ATELIER_CLAUDE_PLUGIN_DIR")
+        command "${ATELIER_CLAUDE_BIN:-claude}" --settings "$ATELIER_CLAUDE_SETTINGS" "${__pd[@]}" "$@"
       }
     fi
     precmd_functions=(${precmd_functions:#__atelier_init})

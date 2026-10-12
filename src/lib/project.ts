@@ -1,11 +1,13 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { createStore } from "./store";
 import { basename, fs, invoke, local, locKey, sameLoc, type Location } from "./ipc";
+import { homeShorten } from "./paths";
 import { windows } from "./windows";
+import { recentKey as normalizeRecentKey } from "./recentProjects";
 
 const RECENT_KEY = "atelier.recent";
 const OPEN_IN_KEY = "atelier.openIn";
-const MAX_RECENT = 10;
+const MAX_RECENT = 25; // the Welcome screen declutters (temp/missing/duplicate/worktrees), so keep more than the old 10
 
 function readRecent(): Location[] {
   try {
@@ -26,6 +28,16 @@ if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
     if (e.key === RECENT_KEY) projectStore.set({ recent: readRecent() });
   });
+}
+
+/** "Remove from Recent Projects": only edits the recent-list storage, never the project on disk. Persists across windows. */
+export function removeRecent(...locs: Location[]) {
+  const gone = new Set(locs.map((l) => normalizeRecentKey(l)));
+  const recent = readRecent().filter((r) => !gone.has(normalizeRecentKey(r)));
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  } catch {}
+  projectStore.set({ recent });
 }
 
 export const projectName = (l: Location) => basename(l.path) || l.path;
@@ -68,7 +80,7 @@ export function setOpenIn(v: OpenIn) {
   } catch {}
 }
 
-const displayPath = (l: Location) => (l.host === "local" ? l.path.replace(/^\/Users\/[^/]+/, "~") : `${l.host}:${l.path}`);
+const displayPath = (l: Location) => (l.host === "local" ? homeShorten(l.path) : `${l.host}:${l.path}`);
 
 /**
  * User-initiated open (Open Folder, recent list, project switcher), IntelliJ semantics:

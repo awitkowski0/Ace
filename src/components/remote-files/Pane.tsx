@@ -1,3 +1,4 @@
+import { isMod } from "../../lib/platform";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { basename, dirname, fs, joinPath, type Location } from "../../lib/ipc";
 import { openFile } from "../../editor/store";
@@ -279,11 +280,11 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane({ paneId, active
     if (ev.key === "ArrowDown") go(i + 1);
     else if (ev.key === "ArrowUp") go(i < 0 ? 0 : i - 1);
     else if (ev.key === "Enter") { const r = rows[i]; r && open(r); }
-    else if (ev.key === "Backspace" && !ev.metaKey) up();
+    else if (ev.key === "Backspace" && !isMod(ev)) up();
     else if (ev.key === "Backspace" || ev.key === "Delete") remove();
     else if (ev.key === "F2") rename();
-    else if (ev.key === "a" && ev.metaKey) setSel(new Set(rows.map((r) => r.path)));
-    else if (ev.key === "r" && ev.metaKey) refresh();
+    else if (ev.key === "a" && isMod(ev)) setSel(new Set(rows.map((r) => r.path)));
+    else if (ev.key === "r" && isMod(ev)) refresh();
     else return;
     ev.preventDefault();
   };

@@ -229,6 +229,10 @@ export function installQaHarness() {
       if (!ctl) return null;
       return cmd ? await ctl[cmd]?.(...args) : ctl.snapshot?.();
     },
+    /** Animation Studio test hooks (scripts/qa/animstudio.mjs) */
+    anim: async () => (await import("../components/animstudio/qa")).animQa,
+    /** profiles (Developer / Asset Dev) test hooks (scripts/qa/profiles.mjs) */
+    profiles: async () => (await import("../components/profiles/qa")).profilesQa,
     /** colour scheme test hooks (scripts/qa/themes.mjs) */
     themes: async () => (await import("../theme/qa")).themeQa,
     version: 2,

@@ -15,3 +15,7 @@ import "./components/shell/RecentProjects"; // RecentProjects popup (toolbar pro
 import "./theme/register"; // colour schemes: Settings > Appearance, Quick Switch Scheme
 import "./components/gradle/register"; // Gradle tool window, pinned tasks in .ace/config.json (docs/GRADLE.md)
 import "./components/godot/register"; // Godot: run configs, tool window, GDScript debugger (remote debugger), docs/GODOT.md
+import "./components/worktrees/register"; // Git worktrees: Switch Worktree… (⌃⌥W), New/Remove/Prune
+import "./components/animstudio/register"; // Animation Studio: geo / animation / bbmodel editor actions (docs/ANIMSTUDIO.md)
+import "./components/animstudio/bridge"; // Claude/MCP live bridge (window.__aceStudioBridge, docs/ANIMSTUDIO.md)
+import "./components/profiles/register"; // Profiles: Developer / Asset Dev (docs/PROFILES.md) -- keep LAST: it filters what the others registered

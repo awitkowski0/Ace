@@ -1,4 +1,5 @@
 /** Pure helpers of the interpreter UI (no React / no IPC): labels, grouping, terminal activation. Unit-tested in logic.test.ts. */
+import { homeShorten } from "../../../lib/paths";
 import type { Interp } from "../api";
 
 export const KIND_LABEL: Record<Interp["kind"], string> = {
@@ -9,7 +10,7 @@ const KIND_ORDER: Interp["kind"][] = ["venv", "uv", "poetry", "pipenv", "conda",
 /** "/Users/me/proj/.venv/bin/python" -> "~/proj/.venv/bin/python" */
 export function shortPath(p: string, home?: string | null): string {
   if (home && (p === home || p.startsWith(home + "/"))) return "~" + p.slice(home.length);
-  return p.replace(/^\/Users\/[^/]+(?=\/|$)/, "~").replace(/^\/home\/[^/]+(?=\/|$)/, "~");
+  return homeShorten(p);
 }
 
 /** Status-bar text (PyCharm New UI wording). */

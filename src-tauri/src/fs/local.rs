@@ -68,4 +68,7 @@ impl FsBackend for LocalBackend {
     fn create_dir(&self, path: &str) -> FsResult<()> {
         fs::create_dir_all(path).map_err(|x| e(path, x))
     }
+    fn copy(&self, from: &str, to: &str) -> FsResult<()> {
+        crate::files::copy_recursive(std::path::Path::new(from), std::path::Path::new(to))
+    }
 }

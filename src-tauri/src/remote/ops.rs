@@ -187,6 +187,17 @@ pub fn rename(host: &str, from: &str, to: &str) -> FsResult<()> {
     r
 }
 
+pub fn copy(host: &str, from: &str, to: &str) -> FsResult<()> {
+    let script = format!(
+        "if [ -e {t} ] || [ -L {t} ]; then echo 'target already exists' >&2; exit 1; fi; cp -R -P -- {f} {t}",
+        f = qp(from),
+        t = qp(to)
+    );
+    let r = run(host, &script).map(|_| ());
+    invalidate(host, to);
+    r
+}
+
 pub fn delete(host: &str, path: &str) -> FsResult<()> {
     let t = path.trim_end_matches('/');
     if t.is_empty() || t == "~" || t.matches('/').count() < 2 && t.starts_with('/') {

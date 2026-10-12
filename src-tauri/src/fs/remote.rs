@@ -14,4 +14,5 @@ impl FsBackend for RemoteBackend {
     fn rename(&self, a: &str, b: &str) -> FsResult<()> { ops::rename(&self.host, a, b) }
     fn delete(&self, p: &str) -> FsResult<()> { ops::delete(&self.host, p) }
     fn create_dir(&self, p: &str) -> FsResult<()> { ops::create_dir(&self.host, p) }
+    fn copy(&self, a: &str, b: &str) -> FsResult<()> { ops::copy(&self.host, a, b) }
 }

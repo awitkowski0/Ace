@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect, useLayoutEffect, useRef, type PointerEvent as RPointerEvent } from "react";
 import type { ToolWindowProps } from "../../toolwindows/registry";
 import { useStore } from "../../lib/store";
@@ -86,7 +87,7 @@ function SplitArea({ tab }: { tab: Tab }) {
         return p ? <PaneView key={id} pane={p} rect={zoomed ? FULL : rects.get(id) ?? FULL} focused={tab.focus === id} multi={all.length > 1} /> : null;
       })}
       {!zoomed && layoutSplits(tab.root).map((s) => <Divider key={s.id} tab={tab} id={s.id} dir={s.dir} rect={s.rect} ratio={s.ratio} />)}
-      {zoomed && <div className="term-zoom-badge" title="Zoomed split (⇧⌘↩ to restore)">zoomed</div>}
+      {zoomed && <div className="term-zoom-badge" title={`Zoomed split (${formatShortcut("⇧⌘↩ to restore")})`}>zoomed</div>}
     </div>
   );
 }
@@ -153,7 +154,7 @@ export function TerminalPanel({ root }: ToolWindowProps) {
             </div>
           );
         })}
-        <button className="term-add" title="New Tab (⌘T)" onClick={() => newTerminalTab()}>+</button>
+        <button className="term-add" title={`New Tab (${formatShortcut("⌘T")})`} onClick={() => newTerminalTab()}>+</button>
         <button className="term-add" title="Select session type" onClick={hostMenu}><ChevronDown /></button>
       </div>
       <div className="term-body">{tab && <SplitArea key={tab.id} tab={tab} />}</div>

@@ -1,4 +1,5 @@
 /** One terminal surface: xterm + pty + Ghostty-style behaviours (OSC 7/8/9/52/133/777, search, links, clipboard, images). */
+import { isMod } from "../../lib/platform";
 import { Terminal, type IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -104,7 +105,7 @@ export class Pane {
       allowProposedApi: true,
       macOptionIsMeta: s.optionAsAlt,
       theme: NORD,
-      linkHandler: { activate: (e, uri) => { if (e.metaKey) void this.openUri(uri); }, allowNonHttpProtocols: true },
+      linkHandler: { activate: (e, uri) => { if (isMod(e)) void this.openUri(uri); }, allowNonHttpProtocols: true },
     });
     this.el = document.createElement("div");
     this.el.className = "term-pane";
@@ -118,7 +119,7 @@ export class Pane {
     t.loadAddon(this.searchAddon);
     t.loadAddon(new Unicode11Addon());
     t.unicode.activeVersion = "11";
-    t.loadAddon(new WebLinksAddon((e, uri) => { if (e.metaKey) void this.openUri(uri); }));
+    t.loadAddon(new WebLinksAddon((e, uri) => { if (isMod(e)) void this.openUri(uri); }));
     t.registerLinkProvider(filePathLinks(t, {
       host: () => this.host,
       cwd: () => this.cwd,

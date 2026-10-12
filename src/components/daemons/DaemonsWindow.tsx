@@ -1,3 +1,4 @@
+import { homeShorten } from "../../lib/paths";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onWindowActive, windowActive } from "../../lib/activity";
 import { invoke } from "../../lib/ipc";
@@ -21,7 +22,7 @@ const COLS: { key: SortKey; title: string; w: string; num?: boolean }[] = [
 const KIND_ORDER: Record<string, number> = { gradle: 0, kotlin: 1, java: 2, lsp: 3, claude: 4, atelier: 5, minecraft: 6 };
 
 const errMsg = (e: unknown) => (typeof e === "string" ? e : (e as Error)?.message ?? String(e));
-const short = (p: string | null) => (p ? p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~") : "");
+const short = (p: string | null) => (p ? homeShorten(p) : "");
 
 export function DaemonsWindow() {
   const [hosts, setHosts] = useState<string[]>(["local"]);

@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect, useRef } from "react";
 import type { Pane } from "./pane";
 
@@ -24,7 +25,7 @@ export function SearchBar({ pane }: { pane: Pane }) {
       <span className="term-search-count">{!s.query ? "" : s.count ? `${s.index + 1}/${s.count}` : "No results"}</span>
       <button className={s.caseSensitive ? "on" : ""} title="Match Case" onClick={() => pane.setSearch(s.query, { caseSensitive: !s.caseSensitive })}>Aa</button>
       <button className={s.regex ? "on" : ""} title="Regex" onClick={() => pane.setSearch(s.query, { regex: !s.regex })}>.*</button>
-      <button title="Previous (⇧↩)" onClick={() => pane.searchPrev()}>↑</button>
+      <button title={`Previous (${formatShortcut("⇧↩")})`} onClick={() => pane.searchPrev()}>↑</button>
       <button title="Next (↩)" onClick={() => pane.searchNext()}>↓</button>
       <button title="Close (Esc)" onClick={() => pane.closeSearch()}>×</button>
     </div>

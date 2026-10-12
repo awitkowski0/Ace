@@ -11,6 +11,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { claudeApi, claudeStore, launch, openSessionProject, refreshHost, relTime, runningIds, unknownRunning, type SessionInfo } from "./api";
 import { aiStore, attnFor, isOptedIn, paneForSession, toggleOptIn, clearAttn, skey } from "./ai";
 import "./claude.css";
+import { fileManagerName } from "../../lib/platform";
 
 const HOST_KEY = "atelier.claude.host";
 const readHost = () => {
@@ -138,7 +139,7 @@ export function ClaudePanel({ root }: ToolWindowProps) {
       { label: "New Session in Project", run: () => launch.newSession(s.host, s.cwd) },
       { label: "", separator: true },
       { label: "Open Project", run: () => void openSessionProject(s) },
-      { label: s.host === "local" ? "Reveal JSONL in Finder" : "Open JSONL in Editor", run: () => (s.host === "local" ? claudeApi.reveal(s.file) : void openFile({ host: s.host, path: s.file })) },
+      { label: s.host === "local" ? `Reveal JSONL in ${fileManagerName}` : "Open JSONL in Editor", run: () => (s.host === "local" ? claudeApi.reveal(s.file) : void openFile({ host: s.host, path: s.file })) },
       { label: (isOptedIn(s.host, s.id) ? "✓ " : "") + "Notify When Done / Needs Input", run: () => { toggleOptIn({ host: s.host, id: s.id, file: s.file }); } },
       { label: "Copy Session ID", run: () => void navigator.clipboard.writeText(s.id) },
     ]);

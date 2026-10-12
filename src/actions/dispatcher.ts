@@ -1,10 +1,12 @@
 import { getBindings, isIntellijBound, monacoKept } from "./keymap";
-import { isModifierCode, modifierName, strokeFromEvent } from "./keystroke";
+import { isModifierCode, modifierName, strokeCandidates } from "./keystroke";
+import { isMac } from "../lib/platform";
 import { getAction, runAction } from "./registry";
 import { candidates, type FocusState } from "./context";
 import { ModifierGesture, type Mod } from "./modifierGesture";
 import { focusedToolWindowId } from "../lib/layout";
 import { isPopupOpen } from "../components/shell/popups";
+import { isSpeedSearchLive, speedSearchWants } from "../lib/speedSearch";
 
 const CHORD_MS = 1500;
 
@@ -29,6 +31,8 @@ const LEAKY = new Set(["meta R", "meta shift R", "F5", "control R", "meta EQUALS
 
 const modOf = (e: KeyboardEvent): Mod | null => {
   const n = modifierName(e.code) ?? ({ Shift: "shift", Control: "control", Alt: "alt", Meta: "meta" } as Record<string, string>)[e.key];
+  // Windows: the Control key is the command key (double-Ctrl = "double meta"); the Win key is not an Atelier modifier.
+  if (!isMac) return n === "control" ? "meta" : n === "meta" ? null : ((n as Mod) ?? null);
   return (n as Mod) ?? null;
 };
 const isModifierEvent = (e: KeyboardEvent) => isModifierCode(e.code) || ["Shift", "Control", "Alt", "Meta"].includes(e.key);
@@ -62,33 +66,42 @@ export function installDispatcher() {
         return;
       }
       gesture.otherInput();
-      let stroke = strokeFromEvent(e);
-      if (!stroke) return;
+      // IntelliJ speed search: while a tree's search is live, its keys (typing, ⌫, ↩, ⎋, ↑↓, Home/End) beat bare-key tool-window actions.
+      if (isSpeedSearchLive() && speedSearchWants({ active: true, query: "" }, e)) return;
+      const strokes = strokeCandidates(e);
+      if (!strokes.length) return;
+      const stroke = strokes[0];
       const { exact, prefixes } = getBindings();
       // double-⌥ then ↓/↑ while the second ⌥ is still held (clone caret)
       if (gesture.doubleHeld && !pending) {
         const hold = exact.get(`doublehold ${gesture.doubleHeld} ${stroke.split(" ").pop()}`);
         if (hold && dispatchIds(hold)) return swallow(e);
       }
-      const full = pending ? `${pending} , ${stroke}` : stroke;
-      const hit = exact.get(full);
-      if (hit && dispatchIds(hit)) {
-        swallow(e);
-        clearPending();
-        return;
+      // First candidate that is bound and runs wins (Windows: ⌃⌥X, then ⌃X, then ⌘⌥X share one chord; see keystroke.ts).
+      for (const s of strokes) {
+        const full = pending ? `${pending} , ${s}` : s;
+        const hit = exact.get(full);
+        if (hit && dispatchIds(hit)) {
+          swallow(e);
+          clearPending();
+          return;
+        }
       }
-      if (prefixes.has(full)) {
-        swallow(e);
-        pending = full;
-        clearTimeout(pendingTimer);
-        pendingTimer = window.setTimeout(clearPending, CHORD_MS);
-        return;
+      for (const s of strokes) {
+        const full = pending ? `${pending} , ${s}` : s;
+        if (prefixes.has(full)) {
+          swallow(e);
+          pending = full;
+          clearTimeout(pendingTimer);
+          pendingTimer = window.setTimeout(clearPending, CHORD_MS);
+          return;
+        }
       }
       clearPending();
       if (LEAKY.has(stroke)) e.preventDefault();
       // IntelliJ-bound key we do not implement: swallow in the editor instead of letting Monaco/the OS reinterpret it
       // (e.g. ⌥-combos would otherwise insert special characters).
-      if (/\b(meta|alt|control)\b/.test(stroke) && isIntellijBound(stroke) && !monacoKept.has(stroke) && focusState().editor && !isPopupOpen() && (e.target as Element | null)?.closest?.(".monaco-editor")) swallow(e);
+      if (strokes.some((s) => /\b(meta|alt|control)\b/.test(s) && isIntellijBound(s) && !monacoKept.has(s)) && focusState().editor && !isPopupOpen() && (e.target as Element | null)?.closest?.(".monaco-editor")) swallow(e);
     },
     true,
   );

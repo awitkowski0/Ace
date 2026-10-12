@@ -20,10 +20,8 @@ fn used_hosts() -> &'static Mutex<BTreeSet<String>> {
 pub fn command(host: &str, tty: bool) -> Command {
     used_hosts().lock().unwrap().insert(host.to_string());
     let mut c = Command::new("ssh");
+    c.args(mux_args());
     c.args([
-        "-o", "ControlMaster=auto",
-        "-o", "ControlPath=~/.ssh/atelier-%C",
-        "-o", "ControlPersist=120",
         "-o", "ServerAliveInterval=30",
         "-o", "ConnectTimeout=8",
         "-o", "LogLevel=ERROR",
@@ -35,6 +33,17 @@ pub fn command(host: &str, tty: bool) -> Command {
     }
     c.arg(host).arg("--");
     c
+}
+
+/// ControlMaster options (one shared connection per host). Windows OpenSSH has no ControlMaster/ControlPath support, so
+/// there plain `ssh` runs one connection per call.
+#[cfg(not(windows))]
+fn mux_args() -> &'static [&'static str] {
+    &["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ControlPersist=120"]
+}
+#[cfg(windows)]
+fn mux_args() -> &'static [&'static str] {
+    &[]
 }
 
 /// Single-quote `s` for a POSIX shell.
@@ -72,6 +81,9 @@ fn host_users() -> &'static Mutex<std::collections::BTreeMap<String, BTreeSet<St
 }
 
 fn close_master(host: &str) {
+    if cfg!(windows) {
+        return; // no ControlMaster to close (see mux_args)
+    }
     let _ = Command::new("ssh")
         .args(["-o", "ControlPath=~/.ssh/atelier-%C", "-o", "ConnectTimeout=2", "-O", "exit", host])
         .stdin(Stdio::null())
@@ -124,6 +136,9 @@ pub fn users_of(host: &str) -> usize {
 
 /// Close every master connection we opened. Called on app exit.
 pub fn close_all() {
+    if cfg!(windows) {
+        return; // no ControlMaster to close (see mux_args)
+    }
     let hosts: Vec<String> = used_hosts().lock().unwrap().iter().cloned().collect();
     for h in hosts {
         let _ = Command::new("ssh")

@@ -1,4 +1,5 @@
 /** Problems + Usages tool windows, status widget, File Structure and Intentions popups. No monaco imports. */
+import { isWithin, relativeTo } from "../../lib/paths";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../lib/store";
 import { basename } from "../../lib/ipc";
@@ -25,7 +26,7 @@ export function SevIcon({ sev }: { sev: 1 | 2 | 3 | 4 }) {
   );
 }
 
-const relPath = (p: string, root?: string) => (root && p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
+const relPath = (p: string, root?: string) => (root && isWithin(root, p) ? relativeTo(root, p) : p);
 
 interface Row { kind: "file" | "item"; path: string; title?: string; text: string; sub?: string; sev?: 1 | 2 | 3 | 4; range?: Diag["range"]; count?: number }
 

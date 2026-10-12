@@ -1,3 +1,6 @@
+import { isWithin, relativeTo } from "../../lib/paths";
+import { isMod } from "../../lib/platform";
+import { isAbsPath } from "./util";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open as pickPath } from "@tauri-apps/plugin-dialog";
 import type { PopupProps } from "../shell/popups";
@@ -88,7 +91,7 @@ export function EditDialog({ onClose, props }: PopupProps) {
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
-    else if (e.key === "Enter" && (e.metaKey || (e.target as HTMLElement).tagName === "INPUT" && (e.target as HTMLInputElement).type !== "checkbox")) { e.preventDefault(); ok(); }
+    else if (e.key === "Enter" && (isMod(e) || (e.target as HTMLElement).tagName === "INPUT" && (e.target as HTMLInputElement).type !== "checkbox")) { e.preventDefault(); ok(); }
   };
 
   return (
@@ -167,8 +170,8 @@ function Field({ f, cfg, set }: { f: FieldDef; cfg: RunConfig; set: (p: Partial<
         {!remote && <button className="gbtn" title="Browse" data-browse={f.key} onClick={async () => {
           const root = projectStore.get().root?.path;
           const cur = String(v ?? "");
-          const r = await pickPath({ directory: !!f.dir, multiple: false, defaultPath: cur.startsWith("/") ? cur : root });
-          if (typeof r === "string") set({ [f.key]: r.startsWith(root + "/") && f.key !== "interpreter" ? r.slice(root!.length + 1) : r });
+          const r = await pickPath({ directory: !!f.dir, multiple: false, defaultPath: isAbsPath(cur) ? cur : root });
+          if (typeof r === "string") set({ [f.key]: isWithin(root!, r) && f.key !== "interpreter" ? relativeTo(root!, r) : r });
         }}>…</button>}
       </div>
     );

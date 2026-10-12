@@ -21,6 +21,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const TAB_ID: &str = "atelier-projects";
 pub const PREFIX: &str = "project-";
 
@@ -57,6 +58,7 @@ pub fn app() -> Option<&'static AppHandle> {
 }
 
 /// Called by the signal handler right before `process::exit`.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn on_signal_exit() {
     if let Some(app) = APP.get() {
         tauri_plugin_single_instance::destroy(app);
@@ -276,6 +278,7 @@ pub fn create_window(app: &AppHandle, project: Option<Location>, anchor: Option<
         s.wins.push(WinRec { label: l.clone(), project: project.clone() });
         l
     };
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut b = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title(project_title(project.as_ref()))
         .inner_size(1500.0, 950.0)
@@ -444,6 +447,7 @@ pub fn on_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
 }
 
 /// macOS open-file events (`open -a Atelier <folder>`, dropping a folder on the Dock icon).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn on_opened(app: &AppHandle, urls: Vec<tauri::Url>) {
     for u in urls {
         if u.scheme() != "file" {

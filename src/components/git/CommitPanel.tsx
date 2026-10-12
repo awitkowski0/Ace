@@ -1,3 +1,4 @@
+import { formatShortcut, isMod } from "../../lib/platform";
 import { useEffect, useMemo, useRef } from "react";
 import { createStore, useStore } from "../../lib/store";
 import { basename } from "../../lib/ipc";
@@ -206,8 +207,8 @@ export function CommitPanel(_: ToolWindowProps) {
     <div className="commitpanel">
       <div className="gtoolbar">
         <button className="icon-btn sm" title="Refresh" onClick={() => refreshAll()}><RefreshIcon /></button>
-        <button className="icon-btn sm" title="Rollback… (⌥⌘Z)" onClick={() => rollback((status?.changes ?? []).filter((c) => isChecked(c, cs)))}><RollbackIcon /></button>
-        <button className="icon-btn sm" title="Show Diff (⌘D)" onClick={() => sc && openChangeDiff(sc)}><DiffIcon /></button>
+        <button className="icon-btn sm" title={`Rollback… (${formatShortcut("⌥⌘Z")})`} onClick={() => rollback((status?.changes ?? []).filter((c) => isChecked(c, cs)))}><RollbackIcon /></button>
+        <button className="icon-btn sm" title={`Show Diff (${formatShortcut("⌘D")})`} onClick={() => sc && openChangeDiff(sc)}><DiffIcon /></button>
         <span className="gsep" />
         <button className="icon-btn sm" title="Expand All" onClick={() => patch({ collapsed: new Set() })}><ExpandAllIcon /></button>
         <button className="icon-btn sm" title="Collapse All" onClick={() => patch({ collapsed: new Set(rows.filter((r) => r.t !== "file").map((r) => r.id)) })}><CollapseAllIcon /></button>
@@ -285,7 +286,7 @@ export function CommitPanel(_: ToolWindowProps) {
           value={cs.message}
           onChange={(e) => patch({ message: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && e.metaKey) { e.preventDefault(); doCommit(false); }
+            if (e.key === "Enter" && isMod(e)) { e.preventDefault(); doCommit(false); }
           }}
         />
         <div className="gcommit-row">

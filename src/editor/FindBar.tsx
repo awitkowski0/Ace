@@ -1,3 +1,4 @@
+import { formatShortcut, isMod } from "../lib/platform";
 import { useEffect, useRef } from "react";
 import { useStore } from "../lib/store";
 import { SearchIcon, CloseIcon } from "../components/shell/icons";
@@ -38,9 +39,9 @@ export function FindBar({ groupId }: { groupId: string }) {
       e.preventDefault();
       if ((e.target as HTMLElement).dataset.role === "replace") replaceCurrent(ed());
       else findNext(e.shiftKey ? -1 : 1, ed(), true);
-    } else if (e.altKey && e.metaKey && e.code === "KeyC") { e.preventDefault(); toggle("matchCase"); }
-    else if (e.altKey && e.metaKey && e.code === "KeyW") { e.preventDefault(); toggle("wholeWord"); }
-    else if (e.altKey && e.metaKey && e.code === "KeyR") { e.preventDefault(); toggle("regex"); }
+    } else if (e.altKey && isMod(e) && e.code === "KeyC") { e.preventDefault(); toggle("matchCase"); }
+    else if (e.altKey && isMod(e) && e.code === "KeyW") { e.preventDefault(); toggle("wholeWord"); }
+    else if (e.altKey && isMod(e) && e.code === "KeyR") { e.preventDefault(); toggle("regex"); }
   };
 
   return (
@@ -55,14 +56,14 @@ export function FindBar({ groupId }: { groupId: string }) {
             placeholder="Search"
             onChange={(e) => findStore.set({ query: e.target.value })}
           />
-          <button className={"find-opt" + (f.matchCase ? " on" : "")} title="Match Case (⌥⌘C)" onClick={() => toggle("matchCase")}>Cc</button>
-          <button className={"find-opt" + (f.wholeWord ? " on" : "")} title="Words (⌥⌘W)" onClick={() => toggle("wholeWord")}>W</button>
-          <button className={"find-opt" + (f.regex ? " on" : "")} title="Regex (⌥⌘R)" onClick={() => toggle("regex")}>.*</button>
+          <button className={"find-opt" + (f.matchCase ? " on" : "")} title={`Match Case (${formatShortcut("⌥⌘C")})`} onClick={() => toggle("matchCase")}>Cc</button>
+          <button className={"find-opt" + (f.wholeWord ? " on" : "")} title={`Words (${formatShortcut("⌥⌘W")})`} onClick={() => toggle("wholeWord")}>W</button>
+          <button className={"find-opt" + (f.regex ? " on" : "")} title={`Regex (${formatShortcut("⌥⌘R")})`} onClick={() => toggle("regex")}>.*</button>
         </div>
         <span className="find-count">{count}</span>
-        <button className="icon-btn sm" title="Previous Occurrence (⇧⌘G)" onClick={() => findNext(-1, ed(), true)}>↑</button>
-        <button className="icon-btn sm" title="Next Occurrence (⌘G)" onClick={() => findNext(1, ed(), true)}>↓</button>
-        <button className={"find-opt wide" + (f.replace ? " on" : "")} title="Toggle Replace (⌘R)" onClick={() => findStore.set((s) => ({ replace: !s.replace }))}>Replace</button>
+        <button className="icon-btn sm" title={`Previous Occurrence (${formatShortcut("⇧⌘G")})`} onClick={() => findNext(-1, ed(), true)}>↑</button>
+        <button className="icon-btn sm" title={`Next Occurrence (${formatShortcut("⌘G")})`} onClick={() => findNext(1, ed(), true)}>↓</button>
+        <button className={"find-opt wide" + (f.replace ? " on" : "")} title={`Toggle Replace (${formatShortcut("⌘R")})`} onClick={() => findStore.set((s) => ({ replace: !s.replace }))}>Replace</button>
         <div className="grow" />
         <button className="icon-btn sm" title="Close (Esc)" onClick={closeFind}><CloseIcon /></button>
       </div>

@@ -259,10 +259,7 @@ fn upload(app: &AppHandle, j: &Job) -> Result<(u64, u64), String> {
         f?;
     } else {
         let dest = format!("{}/{}", j.dest_dir.trim_end_matches('/'), j.dest_name);
-        let mode = {
-            use std::os::unix::fs::PermissionsExt;
-            meta.permissions().mode() & 0o7777
-        };
+        let mode = crate::platform::mode(&meta.permissions()) & 0o7777;
         // commit (rename) only if the full size arrived, so a cancelled/broken stream never leaves a truncated file
         let script = format!(
             "mkdir -p -- {d} && t={t}.atelier-tmp.$$ && if cat > \"$t\" && [ \"$(stat -c %s -- \"$t\")\" = {size} ] && chmod {mode:o} \"$t\" && mv -f -- \"$t\" {t}; then :; else rm -f \"$t\"; exit 1; fi",

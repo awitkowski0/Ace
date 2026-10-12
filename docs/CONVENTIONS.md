@@ -44,6 +44,11 @@ Several agents work in this tree at the same time. Stay inside the files you own
   `{endLine,endCol}`), `openDiff(spec: DiffSpec)` (diff as an editor tab; ⌘S saves the right/working side), `saveAll`,
   `splitActive("right"|"down")`, `navigateBack/Forward`, `editorStore`; `activeEditor()`, `triggerEditor(cmd)` in
   `editor/editorRegistry.ts`; Monaco instance from `editor/monacoSetup.ts`.
+- Speed search (IntelliJ type-to-find in trees/lists): `useSpeedSearch({rows, text, selected, select, activate})` from `components/shell/speedSearch.tsx`
+  (pure matcher + state machine in `src/lib/speedSearch.ts`, tests `speedSearch.test.ts`, QA `scripts/qa/speedsearch.mjs`). Call `ss.onKeyDown(e)` first in the
+  tree's keydown, wrap tree in `<div className="ss-host" {...ss.hostProps}>` + `{ss.popup}`, render names with `ss.highlight(rowIndex, text)`; `select(i)` must select AND
+  scroll. Used by ProjectTree, AssetTree, GradleWindow. The dispatcher yields bare keys (typing, ⌫ ↩ ⎋ ↑↓ Home End) to a live search; a bare key bound to an enabled action in
+  that tool window context still wins when idle, so search never starts on it (as in IntelliJ). Matching is camel-hump / word-start / substring / `*`, case-insensitive.
 - Theme: Nord CSS variables in `src/styles/theme.css`. Match IntelliJ New UI spacing (24px rows, 13px UI font).
 
 ## Cross-module contracts
@@ -94,4 +99,4 @@ Ace stores per project stays in the app data dir (`pstore`), never in the repo. 
   meanwhile is not lost), pretty-printed (2 spaces), `version` first, other keys in their existing order, trailing newline, so diffs stay clean.
 - The file/dir is only created on the first write. A file that is not valid JSON is never overwritten (the error is in `repoConfigStore`).
 - External edits (pull, editor) reload automatically through the existing fs watcher; our own writes do not echo.
-- Never write other files into the project. Sections in use: `gradle.pinned`, `hotswap.onSave` (docs/GRADLE.md).
+- Never write other files into the project. Sections in use: `gradle.pinned`, `hotswap.onSave` (docs/GRADLE.md). Asset Dev: `profile`, `assetRun`, `assets` (docs/PROFILES.md).

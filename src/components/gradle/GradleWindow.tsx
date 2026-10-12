@@ -6,6 +6,7 @@ import { keysFor } from "../../actions/keymap";
 import { formatKeystroke } from "../../actions/keystroke";
 import { showContextMenu } from "../shell/contextMenu";
 import { promptDialog } from "../shell/dialogs";
+import { useSpeedSearch } from "../shell/speedSearch";
 import { ChevronDown, ChevronRight, PinIcon } from "../shell/icons";
 import type { ToolWindowProps } from "../../toolwindows/registry";
 import { gradleStore, reloadGradle } from "./model";
@@ -78,7 +79,13 @@ export function GradleWindow(_: ToolWindowProps) {
   useEffect(() => { body.current?.querySelector(".gj-row.selected")?.scrollIntoView({ block: "nearest" }); }, [sel?.id]);
 
   const select = (r: Row) => gradleUi.set({ selected: r });
+  const ss = useSpeedSearch({
+    rows, text: (r) => r.label, selected: sel ? rows.findIndex((r) => r.id === sel.id) : -1,
+    select: (i) => select(rows[i]), // the effect above scrolls the selected row into view
+    activate: (i) => { const r = rows[i]; if (r.task) void runTask(r.task, r.args ?? "", r.kind === "pinned" && r.label !== r.task ? r.label : ""); else if (r.hasChildren) toggleRow(r.id); },
+  });
   const key = (e: React.KeyboardEvent) => {
+    if (ss.onKeyDown(e)) return;
     const i = sel ? rows.findIndex((r) => r.id === sel.id) : -1;
     if (e.key === "ArrowDown") { e.preventDefault(); select(rows[Math.min(rows.length - 1, i + 1)] ?? rows[0]); }
     else if (e.key === "ArrowUp") { e.preventDefault(); if (rows.length) select(rows[Math.max(0, i - 1)]); }
@@ -94,6 +101,7 @@ export function GradleWindow(_: ToolWindowProps) {
   return (
     <div className="gj" data-testid="gradle-window">
       {g.status === "loading" && <div className="gj-prog" data-testid="gradle-progress" />}
+      <div className="ss-host" style={{ flex: 1, height: "auto", display: "flex", flexDirection: "column" }} {...ss.hostProps}>
       <div className="gj-body" ref={body} tabIndex={0} data-autofocus onKeyDown={key} data-testid="gradle-tree">
         {g.status === "error" && (
           <div className="gj-err" data-testid="gradle-error">
@@ -103,7 +111,7 @@ export function GradleWindow(_: ToolWindowProps) {
           </div>
         )}
         {cfgErr && <div className="gj-err"><div className="gj-err-head">{cfgErr}</div></div>}
-        {rows.map((r) => {
+        {rows.map((r, ri) => {
           const open = ui.open.has(r.id);
           const kindCls = r.kind === "project" ? "proj" : r.kind === "pinned-root" || r.kind === "pinned" ? "pin" : r.kind === "group" ? "group" : "";
           return (
@@ -123,12 +131,14 @@ export function GradleWindow(_: ToolWindowProps) {
               <span className={"gj-ico " + kindCls}>
                 {r.kind === "project" ? <GradleIcon size={14} /> : r.kind === "pinned-root" || r.kind === "pinned" ? <PinIcon /> : r.kind === "task" ? <TaskIcon /> : null}
               </span>
-              <span className="gj-label">{r.label}</span>
+              <span className="gj-label">{ss.highlight(ri, r.label)}</span>
               {r.kind === "pinned" && <span className="gj-hint">{[r.label !== r.task ? r.task : "", r.args].filter(Boolean).join("  ")}</span>}
             </div>
           );
         })}
         {!g.model && g.status !== "error" && <div className="gj-empty">{g.status === "loading" ? "Loading Gradle projects…" : "No Gradle model yet."}</div>}
+      </div>
+      {ss.popup}
       </div>
       <div className="gj-status" data-testid="gradle-status" data-status={g.status} data-cached={g.fromCache ? "1" : "0"}>
         {g.status === "loading" ? <span>Syncing Gradle project… <Elapsed since={g.startedAt} /></span> : null}

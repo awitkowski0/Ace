@@ -28,6 +28,8 @@ export interface Action {
   isEnabled?: () => boolean;
   /** optional; omitted = "global" (backward compatible) */
   context?: ActionContext;
+  /** profiles this action exists in (src/components/profiles); omitted = every profile */
+  profiles?: string[];
 }
 
 const reg = createRegistry<Action>();
@@ -36,9 +38,19 @@ export const getAction = reg.get;
 export const listActions = reg.list;
 export const subscribeActions = reg.subscribe;
 
-export function runAction(id: string) {
+// == profiles hook == "ok" runs; "hidden" = act as if the action did not exist; "blocked" = swallow (the gate shows its notice); {redirect} = run that action
+export type ActionGate = (a: Action) => "ok" | "hidden" | "blocked" | { redirect: string };
+let gate: ActionGate | null = null;
+export const setActionGate = (g: ActionGate | null) => { gate = g; };
+
+export function runAction(id: string): boolean {
   const a = reg.get(id);
-  if (!a || (a.isEnabled && !a.isEnabled())) return false;
+  if (!a) return false;
+  const g = gate ? gate(a) : "ok";
+  if (g === "hidden") return false;
+  if (g === "blocked") return true;
+  if (typeof g === "object") return g.redirect !== id && runAction(g.redirect);
+  if (a.isEnabled && !a.isEnabled()) return false;
   Promise.resolve(a.run()).catch((e) => console.error(`action ${id} failed`, e));
   return true;
 }

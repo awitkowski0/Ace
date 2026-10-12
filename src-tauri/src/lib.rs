@@ -3,6 +3,8 @@ mod claude;
 mod claude_hooks;
 mod daemons;
 mod dap;
+mod files;
+pub mod platform;
 mod fs;
 mod git;
 mod godot;
@@ -21,6 +23,7 @@ mod pty;
 mod remote;
 mod runner;
 mod search;
+mod studio_bridge;
 mod termext;
 mod uiprefs;
 mod windows;
@@ -42,6 +45,8 @@ pub fn run() {
         .setup(|app| {
             menu::install(app.handle())?;
             automation::start(app.handle());
+            // == studio_bridge ==
+            studio_bridge::start(app.handle());
             windows::startup(app.handle());
             Ok(())
         })
@@ -69,6 +74,12 @@ pub fn run() {
             fs::fs_stat,
             fs::fs_rename,
             fs::fs_delete,
+            fs::fs_copy,
+            files::fs_trash,
+            files::files_clipboard_write,
+            files::files_clipboard_read,
+            files::files_reveal,
+            files::files_open,
             fs::fs_create_dir,
             fs::fs_home,
             fs::bytes::fs_read_bytes,
@@ -94,6 +105,8 @@ pub fn run() {
             windows::win_debug,
             windows::win_tabbed,
             windows::project_branch,
+            // == studio_bridge ==
+            studio_bridge::studio_bridge_result,
             // == automation ==
             automation::qa_enabled,
             automation::qa_result,
@@ -134,6 +147,23 @@ pub fn run() {
             git::git_log,
             git::git_commit_files,
             git::git_blame,
+            git::git_ls_files,
+            git::git_stash_push,
+            git::git_stash_apply,
+            git::git_stash_drop,
+            git::git_repo_state,
+            git::git_resolve,
+            git::git_rebase,
+            git::git_merge_abort,
+            git::git_user,
+            git::git_gh,
+            git::git_fetch_quiet,
+            git::git_incoming,
+            git::git_worktree_list,
+            git::git_worktree_status,
+            git::git_worktree_add,
+            git::git_worktree_remove,
+            git::git_worktree_prune,
             // == lsp ==
             lsp::lsp_detect,
             lsp::lsp_start,

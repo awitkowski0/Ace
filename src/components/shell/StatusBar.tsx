@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useStore, useRegistry } from "../../lib/store";
 import { editorStore } from "../../editor/store";
 import { projectStore } from "../../lib/project";
@@ -27,7 +28,7 @@ export function StatusBar() {
       {by("right").map((w) => <w.component key={w.id} />)}
       {doc && (
         <>
-          {doc.kind !== "diff" && <span className="sb-item" title="Go to Line/Column (⌘L)" onClick={() => openPopup("GotoLine")}>{cursor.line}:{cursor.col}</span>}
+          {doc.kind !== "diff" && <span className="sb-item" title={`Go to Line/Column (${formatShortcut("⌘L")})`} onClick={() => openPopup("GotoLine")}>{cursor.line}:{cursor.col}</span>}
           <span className="sb-item">LF</span>
           <span className="sb-item">UTF-8</span>
           <span className="sb-item">4 spaces</span>

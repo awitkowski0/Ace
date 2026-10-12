@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use crate::platform::{self, Sig};
 use std::collections::{BTreeSet, HashSet};
 
 const GODOT_ADDR: &str = "127.0.0.1:6005";
@@ -74,7 +75,7 @@ fn resume_godot(app: &AppHandle) -> bool {
         return false;
     }
     for pid in warm_pids(&st) {
-        unsafe { libc::killpg(pid as i32, libc::SIGCONT) };
+        platform::signal_group(pid, Sig::Cont);
     }
     let _ = app.emit("lsp://godot-paused", false);
     true
@@ -94,7 +95,7 @@ fn pause_tick(app: &AppHandle) {
         if idle >= PAUSE_AFTER.as_millis() as u64 && st.pause.gd_focus.lock().unwrap().is_empty() {
             st.pause.paused.store(true, Ordering::SeqCst);
             for pid in pids {
-                unsafe { libc::killpg(pid as i32, libc::SIGSTOP) };
+                platform::signal_group(pid, Sig::Stop);
             }
             let _ = app.emit("lsp://godot-paused", true);
         }
@@ -135,23 +136,30 @@ struct Warm {
     users: BTreeSet<String>, // windows that asked for this root's Godot
 }
 
+#[cfg(target_os = "macos")]
 const GODOT_BIN: &str = "/Applications/Godot.app/Contents/MacOS/Godot";
+/// Windows: no fixed install dir; looked up on PATH (see `spawn_godot`).
+#[cfg(windows)]
+const GODOT_BIN: &str = "Godot.exe";
+#[cfg(not(any(target_os = "macos", windows)))]
+const GODOT_BIN: &str = "godot";
 
 /// Spawn a headless Godot editor for `root` at low priority and wait until its LSP port accepts connections.
 /// Returns (port, registry id). The child is tracked from spawn so an app exit during startup cannot orphan it.
 fn spawn_godot(root: &str, low_priority: bool) -> Result<(u16, u64, Option<TcpStream>), String> {
-    let godot = std::path::Path::new(GODOT_BIN);
+    let godot = if cfg!(windows) { which_path(GODOT_BIN).unwrap_or_else(|| PathBuf::from(GODOT_BIN)) } else { PathBuf::from(GODOT_BIN) };
     if !godot.is_file() {
         return Err("Godot.app not found".into());
     }
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| e.to_string())?.port();
     let gargs = ["--path", root, "--editor", "--headless", "--lsp-port", &port.to_string()];
-    let mut cmd = if low_priority {
+    // `nice` is a unix tool: on Windows the headless editor just runs at normal priority.
+    let mut cmd = if low_priority && cfg!(unix) {
         let mut c = Command::new("/usr/bin/nice");
-        c.args(["-n", "15"]).arg(godot).args(gargs);
+        c.args(["-n", "15"]).arg(&godot).args(gargs);
         c
     } else {
-        let mut c = Command::new(godot);
+        let mut c = Command::new(&godot);
         c.args(gargs);
         c
     };
@@ -300,6 +308,10 @@ const SPECS: &[Spec] = &[
 pub(crate) fn login_path() -> &'static str {
     static P: OnceLock<String> = OnceLock::new();
     P.get_or_init(|| {
+        // Windows GUI apps inherit the full user PATH already; there is no login shell to ask.
+        if cfg!(windows) {
+            return std::env::var("PATH").unwrap_or_default();
+        }
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
         let from_shell = Command::new(sh)
             .args(["-lc", "printf %s \"$PATH\""])
@@ -326,10 +338,15 @@ fn which(bin: &str) -> Option<PathBuf> {
 }
 
 fn which_path(bin: &str) -> Option<PathBuf> {
-    login_path()
-        .split(':')
-        .filter(|d| !d.is_empty())
-        .map(|d| PathBuf::from(d).join(bin))
+    // Windows: executables carry an extension, and npm-installed servers are `.cmd` shims.
+    let names: &[String] = &if cfg!(windows) {
+        [bin.to_string(), format!("{bin}.exe"), format!("{bin}.cmd"), format!("{bin}.bat")].to_vec()
+    } else {
+        vec![bin.to_string()]
+    };
+    std::env::split_paths(login_path())
+        .filter(|d| !d.as_os_str().is_empty())
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|p| p.is_file())
 }
 
@@ -467,7 +484,8 @@ fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String
         None => which(spec.bin).ok_or_else(|| format!("{} not found on PATH", spec.bin))?,
     };
     let mut cmd = Command::new(bin);
-    let path = path_prepend.iter().map(|p| format!("{p}:")).collect::<String>() + login_path();
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let path = path_prepend.iter().map(|p| format!("{p}{sep}")).collect::<String>() + login_path();
     cmd.args(spec.args).env("PATH", path).current_dir(&root);
     if spec.id == "jdtls" {
         let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("atelier/jdtls").join(format!("{:x}", root.bytes().fold(5381u64, |h, b| h.wrapping_mul(33) ^ b as u64)));

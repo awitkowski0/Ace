@@ -1,4 +1,5 @@
-//! Native menu bar: App / File / Edit / View / Window. The Window menu lists the open project windows (checkmark on
+//! Native menu bar. macOS: App / File / Edit / View / Window. Windows: File / Edit / View / Window / Help (About, Settings
+//! and Exit move into File and Help, since there is no app menu). The Window menu lists the open project windows (checkmark on
 //! the active one) next to the AppKit-provided tab items (Merge All Windows, Move Tab to New Window, Show All Tabs).
 //! Keys that the in-app keymap owns (⌘W, ⌘`, ⌘⌥` ...) deliberately have NO menu accelerator, so a key press reaches the
 //! webview dispatcher exactly once; only Quit (⌘Q) and the standard Edit items keep theirs.
@@ -10,7 +11,13 @@ const PROJ_PREFIX: &str = "proj:";
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let about = PredefinedMenuItem::about(app, Some("About Ace"), None)?;
+    // Windows has no app menu: Quit becomes "Exit" in File, and About goes to Help. Settings uses the same action as the
+    // toolbar gear. No accelerator on it: the in-app keymap owns the settings key (meta COMMA), see the module doc.
+    #[cfg(target_os = "macos")]
     let quit = MenuItem::with_id(app, "quit", "Quit Ace", true, Some("CmdOrCtrl+Q"))?;
+    #[cfg(not(target_os = "macos"))]
+    let quit = MenuItem::with_id(app, "quit", "Exit", true, Some("CmdOrCtrl+Q"))?;
+    #[cfg(target_os = "macos")]
     let app_menu = Submenu::with_items(
         app,
         "Ace",
@@ -27,6 +34,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             &quit,
         ],
     )?;
+    #[cfg(target_os = "macos")]
     let file = Submenu::with_items(
         app,
         "File",
@@ -39,6 +47,25 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             &MenuItem::with_id(app, "act:CloseProject", "Close Project", true, None::<&str>)?,
         ],
     )?;
+    #[cfg(not(target_os = "macos"))]
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, "act:OpenFolder", "Open Folder\u{2026}", true, None::<&str>)?,
+            &MenuItem::with_id(app, "act:OpenRemoteProject", "Open Remote Project\u{2026}", true, None::<&str>)?,
+            &MenuItem::with_id(app, "act:RecentProjects", "Recent Projects\u{2026}", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "act:CloseProject", "Close Project", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "act:ShowSettings", "Settings\u{2026}", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+    #[cfg(not(target_os = "macos"))]
+    let help = Submenu::with_items(app, "Help", true, &[&about])?;
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -61,14 +88,17 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         true,
         &[
             &PredefinedMenuItem::minimize(app, None)?,
-            &PredefinedMenuItem::maximize(app, Some("Zoom"))?,
+            &PredefinedMenuItem::maximize(app, if cfg!(target_os = "macos") { Some("Zoom") } else { None })?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "next-win", "Next Project Window", true, None::<&str>)?,
             &MenuItem::with_id(app, "prev-win", "Previous Project Window", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
         ],
     )?;
+    #[cfg(target_os = "macos")]
     let menu = Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])?;
+    #[cfg(not(target_os = "macos"))]
+    let menu = Menu::with_items(app, &[&file, &edit, &view, &window, &help])?;
     app.set_menu(menu)?;
     #[cfg(target_os = "macos")]
     {

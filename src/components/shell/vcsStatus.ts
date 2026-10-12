@@ -1,4 +1,5 @@
 /** Project-tree VCS colouring (read-only use of the git module's status; see git/api.ts). */
+import { isWithin, relativeTo } from "../../lib/paths";
 import { useEffect, useMemo, useState } from "react";
 import { fs, joinPath, type Location } from "../../lib/ipc";
 import { useStore } from "../../lib/store";
@@ -41,7 +42,7 @@ export function useVcsClass(root: Location): (path: string, isDir: boolean) => s
     const direct = model.kinds.get(path);
     if (direct) return direct;
     if (model.untrackedDirs.some((d) => path.startsWith(d))) return "vcs-added";
-    const rel = path.startsWith(root.path + "/") ? path.slice(root.path.length + 1) : null;
+    const rel = isWithin(root.path, path) ? relativeTo(root.path, path) : null;
     if (rel && rules.length && isIgnored(rules, rel, isDir)) return "vcs-ignored";
     if (isDir && model.dirs.has(path)) return "vcs-dir-modified";
     return "";

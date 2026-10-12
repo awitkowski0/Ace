@@ -8,7 +8,7 @@
  */
 export type ViewerId =
   | "image" | "audio" | "video" | "model" | "font" | "nbt" | "archive" | "binary" | "toolarge";
-export type DualId = "svg" | "markdown" | "csv" | "svg" | "bbmodel" | "mcmeta";
+export type DualId = "svg" | "markdown" | "csv" | "svg" | "bbmodel" | "mcmeta" | "animstudio";
 export type DualMode = "editor" | "split" | "preview";
 
 export interface Provider {
@@ -30,7 +30,10 @@ export const PROVIDERS: Provider[] = [
   { id: "svg", title: "SVG", kind: "dual", exts: ["svg"], defaultMode: "preview", previewLabel: "Image" },
   { id: "markdown", title: "Markdown", kind: "dual", exts: ["md", "markdown", "mdx"], defaultMode: "split", previewLabel: "Preview" },
   { id: "csv", title: "Table", kind: "dual", exts: ["csv", "tsv"], defaultMode: "preview", previewLabel: "Table" },
-  { id: "bbmodel", title: "Blockbench model", kind: "dual", exts: ["bbmodel"], defaultMode: "preview", previewLabel: "Model" },
+  // Animation Studio (docs/ANIMSTUDIO.md): one dual editor for geo / animation / bbmodel. The old "bbmodel" viewer stays as fallback code only.
+  { id: "animstudio", title: "Animation Studio", kind: "dual", exts: [], suffix: ".geo.json", defaultMode: "preview", previewLabel: "Studio" },
+  { id: "animstudio", title: "Animation Studio", kind: "dual", exts: [], suffix: ".animation.json", defaultMode: "preview", previewLabel: "Studio" },
+  { id: "animstudio", title: "Animation Studio", kind: "dual", exts: ["bbmodel"], defaultMode: "preview", previewLabel: "Studio" },
   { id: "audio", title: "Audio", kind: "viewer", exts: ["wav", "ogg", "oga", "opus", "aiff", "aif", "aifc", "mp3", "flac", "m4a", "aac"] },
   { id: "video", title: "Video", kind: "viewer", exts: ["mp4", "webm", "mov", "m4v", "ogv"] },
   { id: "model", title: "3D model", kind: "viewer", exts: ["glb", "gltf"] },

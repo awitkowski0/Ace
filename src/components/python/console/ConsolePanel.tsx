@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../../lib/platform";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useStore } from "../../../lib/store";
 import { projectStore } from "../../../lib/project";
@@ -98,7 +99,7 @@ export function ConsolePanel() {
       <div className="pyc-bar">
         <button className="pyc-btn" title="Rerun (restart console)" data-act="restart" onClick={() => void restart()}><Ico><path d="M13 8a5 5 0 1 1-1.8-3.8M13 2.5v3h-3" /></Ico></button>
         <button className="pyc-btn" title="Stop" data-act="stop" disabled={!alive} onClick={() => void stop()}><Ico><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></Ico></button>
-        <button className="pyc-btn" title="Interrupt (⌃C)" data-act="interrupt" disabled={st.status !== "busy"} onClick={() => interrupt()}><Ico><path d="M6 3.500v9M10 3.500v9" /></Ico></button>
+        <button className="pyc-btn" title={`Interrupt (${formatShortcut("⌃C")})`} data-act="interrupt" disabled={st.status !== "busy"} onClick={() => interrupt()}><Ico><path d="M6 3.500v9M10 3.500v9" /></Ico></button>
         <button className="pyc-btn" title="Clear All" data-act="clear" onClick={() => clear()}><Ico><path d="M3 4.500h10M6 4.500V3h4v1.500M4.500 4.500l.7 8h5.600l.7-8M7 7v3.500M9 7v3.500" /></Ico></button>
         <div className="pyc-sep" />
         <button className={"pyc-btn" + (st.showVars ? " on" : "")} title="Show Variables" data-act="vars" onClick={() => setShowVars(!st.showVars)}><Ico><path d="M2 4h12M2 8h12M2 12h12M6 3v10" /></Ico></button>

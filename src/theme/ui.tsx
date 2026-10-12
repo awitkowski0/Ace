@@ -62,6 +62,7 @@ export function SettingsPopup({ onClose }: PopupProps) {
           <div className={"set-nav-item"} onClick={() => setPage("appearance")}>Color Scheme</div>
           <div className="set-nav-h">Tools</div>
           <div className={"set-nav-item" + (page === "terminal" ? " on" : "")} onClick={() => setPage("terminal")}>Terminal</div>
+          <div className="set-nav-item" data-testid="settings-profile" onClick={() => { closePopup(); setTimeout(() => openPopup("ProfileSettings"), 0); }}>Profile</div>
         </div>
         {page === "appearance" ? (
           <div className="set-page">

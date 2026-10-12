@@ -32,17 +32,41 @@ export interface ToolWindowDef {
 
 const reg = createRegistry<ToolWindowDef>();
 export const registerToolWindow = reg.register;
-export const getToolWindow = reg.get;
-export const subscribeToolWindows = reg.subscribe;
 export const toolWindowRegistry = reg;
+
+// == profiles hook == (src/components/profiles): a view maps each registered tool window to what the active profile shows
+// (null = hidden, another def = replaced). No view (Developer) = the registry exactly as registered.
+export type ToolWindowView = (tw: ToolWindowDef) => ToolWindowDef | null;
+let view: ToolWindowView | null = null;
+let viewRev = 0;
+const viewSubs = new Set<() => void>();
+export function setToolWindowView(v: ToolWindowView | null) {
+  view = v;
+  viewRev++;
+  viewSubs.forEach((f) => f());
+}
+/** every registered tool window, unfiltered (profiles use this to know what they hide) */
+export const rawToolWindows = () => reg.list();
+export const getToolWindow = (id: string): ToolWindowDef | undefined => {
+  const t = reg.get(id);
+  return t && view ? view(t) ?? undefined : t;
+};
+export const subscribeToolWindows = (fn: () => void) => {
+  const off = reg.subscribe(fn);
+  viewSubs.add(fn);
+  return () => { off(); viewSubs.delete(fn); };
+};
 let cacheSrc: ToolWindowDef[] = [];
+let cacheRev = -1;
 let cacheOut: ToolWindowDef[] = [];
 /** Sorted by `order`; referentially stable between registrations (safe for useSyncExternalStore). */
 export const listToolWindows = () => {
   const src = reg.list();
-  if (src !== cacheSrc) {
+  if (src !== cacheSrc || cacheRev !== viewRev) {
     cacheSrc = src;
-    cacheOut = [...src].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    cacheRev = viewRev;
+    const vis = view ? src.map((t) => view!(t)).filter((t): t is ToolWindowDef => !!t) : src;
+    cacheOut = [...vis].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   }
   return cacheOut;
 };

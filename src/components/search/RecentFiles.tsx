@@ -1,3 +1,5 @@
+import { isMod } from "../../lib/platform";
+import { isWithin, relativeTo } from "../../lib/paths";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PopupShell, type PopupProps } from "../shell/popups";
 import { FileIcon, FolderIcon } from "../shell/icons";
@@ -28,7 +30,7 @@ export function makeRecent(switcher: boolean) {
 
     const files = useMemo(() => {
       const all = recent.map((k) => docs[k]).filter(Boolean).map((d) => {
-        const rel = root && d.loc.path.startsWith(root.path + "/") ? d.loc.path.slice(root.path.length + 1) : d.loc.path;
+        const rel = root && isWithin(root.path, d.loc.path) ? relativeTo(root.path, d.loc.path) : d.loc.path;
         return { d, rel, f: q ? fuzzy(q, d.name) : null };
       });
       return q ? all.filter((x) => x.f).sort((a, b) => b.f!.score - a.f!.score) : all;
@@ -76,7 +78,7 @@ export function makeRecent(switcher: boolean) {
     }, []);
 
     const onKey = (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown" || (!switcher && e.metaKey && e.key.toLowerCase() === "e")) move(1);
+      if (e.key === "ArrowDown" || (!switcher && isMod(e) && e.key.toLowerCase() === "e")) move(1);
       else if (e.key === "ArrowUp") move(-1);
       else if (e.key === "ArrowLeft" && !q) setCol("tw");
       else if (e.key === "ArrowRight" && !q) setCol("files");

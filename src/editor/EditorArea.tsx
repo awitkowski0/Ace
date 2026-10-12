@@ -26,6 +26,7 @@ import { controllerFor } from "./viewers/controllers";
 import { PROVIDERS, type DualMode } from "./viewers/registry";
 import "./viewers/viewers.css";
 import "./viewers/actions";
+import { useProfile } from "../components/profiles/profile";
 
 const DiffView = lazy(() => import("../components/git/DiffPopup").then((m) => ({ default: m.DiffView })));
 
@@ -158,11 +159,13 @@ function EditorGroupView({ id }: { id: string }) {
   }, [activeKey, g?.tabs.length]);
   const doc = g?.active ? docs[g.active] : undefined;
   const dualPrefs = usePrefs(doc?.key ?? "");
+  // == animstudio hook (docs/PROFILES.md): Asset Dev opens geo/animation/bbmodel straight in the Studio and hides the Editor|Studio toggle
+  const assetStudio = useProfile() === "asset" && doc?.dual === "animstudio";
   useEffect(() => { if (doc?.viewer && activeGroup === id) viewerRef.current?.focus({ preventScroll: true }); }, [doc?.key, doc?.viewer]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!g) return null;
   const isActiveGroup = activeGroup === id;
   const isViewer = !!doc?.viewer;
-  const prefsMode = dualPrefs.mode;
+  const prefsMode = assetStudio ? "preview" : dualPrefs.mode;
   if (doc && !doc.viewer && doc.kind !== "diff" && !doc.error) lastText.current = doc.key;
   // Monaco keeps showing the last text doc (hidden) while a viewer tab is in front, so caret/scroll state survives
   const edDoc = isViewer ? (lastText.current && docs[lastText.current] && !docs[lastText.current].viewer ? docs[lastText.current] : undefined) : doc;
@@ -241,7 +244,7 @@ function EditorGroupView({ id }: { id: string }) {
           <div className="editor-empty">{doc.error}</div>
         ) : edDoc && keysReady ? (
           <div className="ed-wrap" style={isViewer ? { display: "none" } : undefined}>
-            {!isViewer && doc?.dual && <DualBar doc={doc} />}
+            {!isViewer && doc?.dual && !assetStudio && <DualBar doc={doc} />}
             <div className="ed-split">
               <div className={"ed-pane ed-code" + (!isViewer && doc?.dual && dualMode(doc, prefsMode) === "preview" ? " hidden" : "")}>
                 <Editor

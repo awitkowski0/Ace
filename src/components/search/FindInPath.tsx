@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { PopupShell, type PopupProps } from "../shell/popups";
@@ -193,9 +194,9 @@ export function makeFindPopup(replaceMode: boolean) {
         <div className="se-fip-fields">
           <div className="se-inputrow">
             <input ref={input} className="se-input" spellCheck={false} placeholder="Search text" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
-            <Toggle on={cs} set={setCs} label="Cc" title="Match Case (⌥C)" />
-            <Toggle on={words} set={setWords} label="W" title="Words (⌥W)" />
-            <Toggle on={regex} set={setRegex} label=".*" title="Regex (⌥X)" />
+            <Toggle on={cs} set={setCs} label="Cc" title={`Match Case (${formatShortcut("⌥C")})`} />
+            <Toggle on={words} set={setWords} label="W" title={`Words (${formatShortcut("⌥W")})`} />
+            <Toggle on={regex} set={setRegex} label=".*" title={`Regex (${formatShortcut("⌥X")})`} />
           </div>
           {replaceMode && (
             <div className="se-inputrow">

@@ -561,6 +561,308 @@ pub async fn git_blame(root: Location, path: String) -> Result<Vec<BlameRange>, 
     .await
 }
 
+// ---------- profiles support (Asset Dev: docs/PROFILES.md) ----------
+// Safe update + commit helpers used by src/components/profiles. Never a bare `git stash` / `git stash pop`: stashes are tagged with a
+// unique message and re-applied / dropped by commit SHA, so a stash made by someone else is never touched.
+
+/// Tracked + untracked (not ignored) files below the project root matching `pathspecs` (git pathspecs, e.g. `:(glob)**/assets/**`),
+/// relative to the project root. Files deleted in the work tree are left out.
+#[tauri::command]
+pub async fn git_ls_files(root: Location, pathspecs: Vec<String>) -> Result<Vec<String>, String> {
+    blocking(move || {
+        let mut a = sv(&["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+        if !pathspecs.is_empty() {
+            a.push("--".into());
+            a.extend(pathspecs.iter().cloned());
+        }
+        let raw = run_raw(&root, &a, &[]).map(|b| String::from_utf8_lossy(&b).into_owned())?;
+        let mut del = sv(&["ls-files", "-z", "--deleted"]);
+        if !pathspecs.is_empty() {
+            del.push("--".into());
+            del.extend(pathspecs.iter().cloned());
+        }
+        let gone: std::collections::HashSet<String> = run_raw(&root, &del, &[])
+            .map(|b| String::from_utf8_lossy(&b).split('\0').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+        let mut seen = std::collections::HashSet::new();
+        Ok(raw.split('\0').filter(|s| !s.is_empty() && !gone.contains(*s) && seen.insert(s.to_string())).map(|s| s.to_string()).collect())
+    })
+    .await
+}
+
+/// `git stash push --include-untracked -m <message>`. Returns the stash commit SHA, or None when there was nothing to stash.
+/// `message` must be unique (the caller tags it); the SHA is verified against it so an unrelated older stash is never returned.
+#[tauri::command]
+pub async fn git_stash_push(root: Location, message: String) -> Result<Option<String>, String> {
+    blocking(move || {
+        run_v(&root, sv(&["stash", "push", "--include-untracked", "-m", &message]))?;
+        let sha = run_raw(&root, &sv(&["rev-parse", "-q", "--verify", "refs/stash"]), &[1])
+            .map(|b| String::from_utf8_lossy(&b).trim().to_string())
+            .unwrap_or_default();
+        if sha.len() != 40 {
+            return Ok(None);
+        }
+        let subject = run_v(&root, sv(&["log", "-1", "--format=%s", &sha]))?;
+        Ok(subject.trim_end().ends_with(&message).then_some(sha))
+    })
+    .await
+}
+
+fn is_sha(s: &str) -> bool {
+    s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// `git stash apply <sha>` (the stash stays in the list; drop it with git_stash_drop once the result is fine).
+#[tauri::command]
+pub async fn git_stash_apply(root: Location, sha: String) -> Result<String, String> {
+    if !is_sha(&sha) { return Err("not a commit id".into()); }
+    blocking(move || run_v(&root, sv(&["stash", "apply", &sha]))).await
+}
+
+/// Drops the stash whose commit is `sha` (no-op when it is already gone).
+#[tauri::command]
+pub async fn git_stash_drop(root: Location, sha: String) -> Result<bool, String> {
+    if !is_sha(&sha) { return Err("not a commit id".into()); }
+    blocking(move || {
+        let list = run(&root, &["stash", "list", "--format=%H"])?;
+        match list.lines().position(|l| l.trim() == sha) {
+            Some(i) => run_v(&root, sv(&["stash", "drop", &format!("stash@{{{i}}}")])).map(|_| true),
+            None => Ok(false),
+        }
+    })
+    .await
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoState {
+    pub rebasing: bool,
+    pub merging: bool,
+}
+
+#[tauri::command]
+pub async fn git_repo_state(root: Location) -> Result<RepoState, String> {
+    blocking(move || {
+        let has = |r: &str| run_raw(&root, &sv(&["rev-parse", "-q", "--verify", r]), &[1]).map(|b| !b.is_empty()).unwrap_or(false);
+        Ok(RepoState { rebasing: has("REBASE_HEAD"), merging: has("MERGE_HEAD") })
+    })
+    .await
+}
+
+/// Resolve a conflicted file by taking one side wholesale (`side` = "ours" | "theirs"), then stage it. A side that deleted the file wins as a delete.
+#[tauri::command]
+pub async fn git_resolve(root: Location, path: String, side: String) -> Result<(), String> {
+    if side != "ours" && side != "theirs" { return Err("side must be ours or theirs".into()); }
+    blocking(move || {
+        let flag = format!("--{side}");
+        let p = [path.clone()];
+        if run_v(&root, with_paths(sv(&["checkout", &flag]), &p)).is_ok() {
+            run_v(&root, with_paths(sv(&["add", "-A"]), &p)).map(|_| ())
+        } else {
+            run_v(&root, with_paths(sv(&["rm", "-q", "-f"]), &p)).map(|_| ())
+        }
+    })
+    .await
+}
+
+/// `continue` | `abort` for a rebase stopped on conflicts (no editor is opened).
+#[tauri::command]
+pub async fn git_rebase(root: Location, action: String) -> Result<String, String> {
+    if action != "continue" && action != "abort" { return Err("bad rebase action".into()); }
+    blocking(move || run_v(&root, sv(&["-c", "core.editor=true", "rebase", &format!("--{action}")]))).await
+}
+
+/// `git merge --abort` / `git reset --merge`-free helper: abort a merge left by a failed pull.
+#[tauri::command]
+pub async fn git_merge_abort(root: Location) -> Result<String, String> {
+    blocking(move || run_v(&root, sv(&["merge", "--abort"]))).await
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GitUser {
+    pub name: String,
+    pub email: String,
+}
+
+#[tauri::command]
+pub async fn git_user(root: Location) -> Result<GitUser, String> {
+    blocking(move || {
+        let get = |k: &str| run_raw(&root, &sv(&["config", "--get", k]), &[1]).map(|b| String::from_utf8_lossy(&b).trim().to_string()).unwrap_or_default();
+        Ok(GitUser { name: get("user.name"), email: get("user.email") })
+    })
+    .await
+}
+
+fn gh_bin() -> String {
+    for p in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"] {
+        if std::path::Path::new(p).exists() { return p.to_string(); }
+    }
+    "gh".into()
+}
+
+/// GitHub CLI, restricted to `--version`, `pr create ...` and `pr view ...`. Returns stdout (the PR URL for create).
+#[tauri::command]
+pub async fn git_gh(root: Location, args: Vec<String>) -> Result<String, String> {
+    let ok = matches!(args.first().map(|s| s.as_str()), Some("--version"))
+        || (args.len() >= 2 && args[0] == "pr" && (args[1] == "create" || args[1] == "view"));
+    if !ok { return Err("unsupported gh command".into()); }
+    blocking(move || {
+        let out = if root.is_local() {
+            Command::new(gh_bin()).args(&args).current_dir(&root.path)
+                .env("GH_PROMPT_DISABLED", "1").env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null())
+                .output().map_err(|e| format!("gh: {e}"))?
+        } else {
+            let mut line = format!("cd {} && GH_PROMPT_DISABLED=1 gh", ssh::quote(&root.path));
+            for a in &args { line.push(' '); line.push_str(&ssh::quote(a)); }
+            ssh::exec(&root.host, &ssh::login_wrap(&line))?
+        };
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        } else {
+            let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if e.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { e })
+        }
+    })
+    .await
+}
+
+/// Quiet background `git fetch --prune` (never prompts; local or over the shared ssh connection). Used by the Asset Dev "newer version" notice.
+#[tauri::command]
+pub async fn git_fetch_quiet(root: Location) -> Result<(), String> {
+    blocking(move || run_v(&root, sv(&["fetch", "--quiet", "--prune", "--no-tags"])).map(|_| ())).await
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Incoming {
+    /// commits on the upstream of the current branch that HEAD does not have
+    pub behind: u32,
+    pub authors: Vec<String>,
+    /// upstream tip (snooze key: a dismissed notice stays dismissed until this changes)
+    pub tip: Option<String>,
+    /// the repository's main branch (origin/HEAD, else origin/main|master) and how far HEAD is behind it
+    pub base: Option<String>,
+    pub base_behind: u32,
+    pub base_tip: Option<String>,
+    pub base_authors: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn git_incoming(root: Location, base: Option<String>) -> Result<Incoming, String> {
+    blocking(move || {
+        let ok1 = |a: &[&str]| run_raw(&root, &sv(a), &[1, 128]).map(|b| String::from_utf8_lossy(&b).trim().to_string()).unwrap_or_default();
+        let count_authors = |range: &str| -> (u32, Vec<String>) {
+            let out = ok1(&["log", "--format=%an", range]);
+            let mut authors: Vec<String> = vec![];
+            let mut n = 0;
+            for l in out.lines().filter(|l| !l.trim().is_empty()) {
+                n += 1;
+                if !authors.iter().any(|a| a == l) && authors.len() < 3 { authors.push(l.to_string()); }
+            }
+            (n, authors)
+        };
+        let mut inc = Incoming::default();
+        let up = ok1(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+        if !up.is_empty() {
+            let (n, a) = count_authors("HEAD..@{u}");
+            inc.behind = n;
+            inc.authors = a;
+            let tip = ok1(&["rev-parse", "@{u}"]);
+            inc.tip = (!tip.is_empty()).then_some(tip);
+        }
+        // `base` (from .ace/config.json assets.baseBranch, e.g. origin/v1.20.1) wins when it exists; else origin/HEAD, origin/main, origin/master
+        let mut base = base.filter(|b| !b.trim().is_empty() && !ok1(&["rev-parse", "-q", "--verify", b.trim()]).is_empty()).map(|b| b.trim().to_string()).unwrap_or_default();
+        if base.is_empty() { base = ok1(&["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]); }
+        if base.is_empty() {
+            for c in ["origin/main", "origin/master"] {
+                if !ok1(&["rev-parse", "-q", "--verify", c]).is_empty() { base = c.to_string(); break; }
+            }
+        }
+        if !base.is_empty() && base != up {
+            let (n, a) = count_authors(&format!("HEAD..{base}"));
+            inc.base_behind = n;
+            inc.base_authors = a;
+            let tip = ok1(&["rev-parse", &base]);
+            inc.base_tip = (!tip.is_empty()).then_some(tip);
+            inc.base = Some(base);
+        }
+        Ok(inc)
+    })
+    .await
+}
+
+// ---------- worktrees ----------
+// Parsing of `git worktree list --porcelain` lives in the frontend (src/lib/worktrees.ts, vitest); Rust only runs git.
+
+/// Raw `git worktree list --porcelain` (local or remote). Run from any directory of the repo.
+#[tauri::command]
+pub async fn git_worktree_list(root: Location) -> Result<String, String> {
+    blocking(move || run(&root, &["worktree", "list", "--porcelain"])).await
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeStatus {
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    /// tracked files with changes (untracked files are skipped on purpose: this must stay cheap)
+    pub dirty: u32,
+}
+
+/// Cheap status of one worktree folder: `status --porcelain=v2 --branch -uno`.
+#[tauri::command]
+pub async fn git_worktree_status(path: Location) -> Result<WorktreeStatus, String> {
+    blocking(move || {
+        let raw = run(&path, &["status", "--porcelain=v2", "-z", "--branch", "-uno"])?;
+        let mut st = Status::default();
+        parse_status(&raw, &mut st);
+        Ok(WorktreeStatus { branch: st.branch, detached: st.detached, upstream: st.upstream, ahead: st.ahead, behind: st.behind, dirty: st.changes.len() as u32 })
+    })
+    .await
+}
+
+/// `worktree add`: existing branch -> `add <path> <branch>`; new branch -> `add -b <branch> <path> [start]`;
+/// track (remote branch `origin/x`) -> `add --track -b x <path> origin/x`.
+#[tauri::command]
+pub async fn git_worktree_add(root: Location, path: String, branch: String, new_branch: bool, start: Option<String>, track: bool) -> Result<String, String> {
+    blocking(move || {
+        let mut a = sv(&["worktree", "add"]);
+        if track { a.push("--track".into()); }
+        if new_branch {
+            let local = if track { branch.split_once('/').map(|x| x.1.to_string()).unwrap_or(branch.clone()) } else { branch.clone() };
+            a.extend(sv(&["-b", &local, &path]));
+            if let Some(s) = start.filter(|s| !s.is_empty()) { a.push(s); } else if track { a.push(branch); }
+        } else {
+            a.push(path);
+            a.push(branch);
+        }
+        run_v(&root, a)
+    })
+    .await
+}
+
+/// force -> `-f -f` (removes dirty and locked worktrees). Without force git itself refuses when files are modified/untracked.
+#[tauri::command]
+pub async fn git_worktree_remove(root: Location, path: String, force: bool) -> Result<String, String> {
+    blocking(move || {
+        let mut a = sv(&["worktree", "remove"]);
+        if force { a.extend(sv(&["-f", "-f"])); }
+        a.push(path);
+        run_v(&root, a)
+    })
+    .await
+}
+
+/// Forget worktrees whose folder is gone (the UI previews them from the `prunable` flag of the list).
+#[tauri::command]
+pub async fn git_worktree_prune(root: Location) -> Result<(), String> {
+    blocking(move || run(&root, &["worktree", "prune"]).map(|_| ())).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,5 +906,38 @@ mod tests {
         assert!(rt!(git_status(root.clone())).unwrap().changes.is_empty());
         let nr = Location { host: "local".into(), path: "/tmp".into() };
         assert!(!rt!(git_status(nr)).unwrap().is_repo);
+    }
+
+    #[test]
+    fn worktree_commands() {
+        let d = std::env::var("ATELIER_GIT_WT_TEST_DIR").unwrap_or_else(|_| format!("{}/atelier-wt-test", std::env::temp_dir().display()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(format!("{d}/main")).unwrap();
+        let m = format!("{d}/main");
+        sh(&m, "git init -q -b main && git config user.email t@t && git config user.name T && echo a > a.txt && git add -A && git commit -qm first && git branch exist");
+        let root = Location { host: "local".into(), path: m.clone() };
+        macro_rules! rt { ($e:expr) => { tauri::async_runtime::block_on($e) }; }
+        let w1 = format!("{d}/main-feat");
+        rt!(git_worktree_add(root.clone(), w1.clone(), "feat".into(), true, None, false)).unwrap();
+        let w2 = format!("{d}/main-exist");
+        rt!(git_worktree_add(root.clone(), w2.clone(), "exist".into(), false, None, false)).unwrap();
+        let raw = rt!(git_worktree_list(root.clone())).unwrap();
+        assert_eq!(raw.matches("worktree ").count(), 3, "{raw}");
+        assert!(raw.contains("branch refs/heads/feat"));
+        // dirty count is cheap (-uno): tracked edit counts, untracked file does not
+        std::fs::write(format!("{w1}/a.txt"), "changed").unwrap();
+        std::fs::write(format!("{w1}/new.txt"), "x").unwrap();
+        let st = rt!(git_worktree_status(Location { host: "local".into(), path: w1.clone() })).unwrap();
+        assert_eq!((st.branch.as_deref(), st.dirty), (Some("feat"), 1));
+        // refuses a dirty worktree without force, removes with force
+        assert!(rt!(git_worktree_remove(root.clone(), w1.clone(), false)).is_err());
+        rt!(git_worktree_remove(root.clone(), w1.clone(), true)).unwrap();
+        assert!(!std::path::Path::new(&w1).exists());
+        // prune: delete a worktree folder behind git's back
+        std::fs::remove_dir_all(&w2).unwrap();
+        assert!(rt!(git_worktree_list(root.clone())).unwrap().contains("prunable"));
+        rt!(git_worktree_prune(root.clone())).unwrap();
+        assert_eq!(rt!(git_worktree_list(root.clone())).unwrap().matches("worktree ").count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

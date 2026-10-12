@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect } from "react";
 import { createStore, useStore } from "../../lib/store";
 
@@ -40,7 +41,7 @@ export function ContextMenuHost() {
               }}
             >
               <span>{it.label}</span>
-              {it.shortcut && <span className="menu-shortcut">{it.shortcut}</span>}
+              {it.shortcut && <span className="menu-shortcut">{formatShortcut(it.shortcut)}</span>}
             </div>
           ),
         )}

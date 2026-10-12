@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useSyncExternalStore } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useStore } from "./lib/store";
-import { initProject, openProjectFlow, openRemoteProject, pickAndOpenFolder, projectKey, projectName, projectStore } from "./lib/project";
+import { initProject, projectKey, projectStore } from "./lib/project";
 import { layoutStore } from "./lib/layout";
 import { getToolWindow, listToolWindows, subscribeToolWindows } from "./toolwindows/registry";
 import { Toolbar } from "./components/shell/Toolbar";
@@ -11,26 +11,10 @@ import { ToolWindowFrame } from "./components/shell/ToolWindowFrame";
 import { DialogHost } from "./components/shell/dialogs";
 import { ContextMenuHost } from "./components/shell/contextMenu";
 import { PopupHost } from "./components/shell/popups";
+import { Welcome } from "./components/shell/Welcome";
 import { QuickTerminal } from "./components/terminal/QuickTerminal";
 
 const EditorArea = lazy(() => import("./editor/EditorArea"));
-
-function Welcome() {
-  const { recent } = useStore(projectStore);
-  return (
-    <div className="welcome">
-      <h1>Ace</h1>
-      <button className="primary" onClick={pickAndOpenFolder}>Open Folder…</button>
-      <button onClick={openRemoteProject}>Open Remote Project…</button>
-      {recent.length > 0 && <div className="welcome-recent">
-        <div className="popup-section">Recent projects</div>
-        {recent.map((l) => (
-          <div key={l.host + l.path} className="popup-row" onClick={() => openProjectFlow(l)}>{projectName(l)}<span className="dim">{l.host}:{l.path}</span></div>
-        ))}
-      </div>}
-    </div>
-  );
-}
 
 export default function App() {
   const { root, ready } = useStore(projectStore);

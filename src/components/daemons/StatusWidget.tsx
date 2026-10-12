@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 import { useEffect, useState } from "react";
 import { onWindowActive, windowActive } from "../../lib/activity";
 import { CpuIcon } from "../shell/icons";
@@ -44,7 +45,7 @@ export function DaemonsStatusWidget() {
   const part = (label: string, s: Sum | null | undefined) => `${label}: ${s ? `${s.gradleCount} · ${fmtBytes(s.rss)}` : "—"}`;
   const text = [part("Gradle", local), ...remote.map((h) => part(h, rem[h]))].join("  ");
   return (
-    <span className="sb-item" title="Processes & Daemons (⌘⇧D)" onClick={() => toggleToolWindow("processes")}>
+    <span className="sb-item" title={`Processes & Daemons (${formatShortcut("⌘⇧D")})`} onClick={() => toggleToolWindow("processes")}>
       <CpuIcon />
       <span>{text}</span>
     </span>

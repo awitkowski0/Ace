@@ -7,11 +7,14 @@ import { BranchIcon, ChevronDown, GearIcon, SearchIcon } from "./icons";
 import { RunWidget } from "../run/Widget";
 import { keysFor } from "../../actions/keymap";
 import { formatKeystroke } from "../../actions/keystroke";
+import { AssetBar } from "../profiles/AssetBar"; // profiles hook
+import { useProfile } from "../profiles/profile";
 
 export function Toolbar() {
   const { root } = useStore(projectStore);
   const { branch } = useStore(shellStore);
   const key = keysFor("SearchEverywhere")[0];
+  const asset = useProfile() === "asset"; // profiles hook: Asset Dev swaps the VCS widget + run widget for the Asset Bar
   return (
     <div className="toolbar" data-tauri-drag-region>
       <div className="traffic-spacer" data-tauri-drag-region />
@@ -20,15 +23,17 @@ export function Toolbar() {
         <span>{root ? projectName(root) : "Ace"}</span>
         <ChevronDown />
       </button>
+      {asset ? <AssetBar /> : (
       <button className="widget" title="Git branch" onClick={() => runAction("Git.Branches")}>
         <BranchIcon />
         <span>{branch ?? "No VCS"}</span>
         <ChevronDown />
       </button>
+      )}
       <div className="grow" data-tauri-drag-region />
-      <div id="run-widget-slot" className="widget-slot">
+      {!asset && <div id="run-widget-slot" className="widget-slot">
         <RunWidget />
-      </div>
+      </div>}
       <button className="icon-btn" title={`Search Everywhere${key ? " " + formatKeystroke(key) : ""}`} onClick={() => runAction("SearchEverywhere")}><SearchIcon /></button>
       <button className="icon-btn" title="Settings" onClick={() => runAction("ShowSettings")}><GearIcon /></button>
     </div>
