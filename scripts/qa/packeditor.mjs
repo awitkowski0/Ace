@@ -44,7 +44,7 @@ component(component => {
     component.hold(hold => hold.then("firing"));
 });
 `);
-w("data/thematic/flight_profiles/repulsor.json", `{
+const REPULSOR = w("data/thematic/flight_profiles/repulsor.json", `{
   "parent": "thematic:jetpack",
   "effects": {
     "jets": [
@@ -54,7 +54,12 @@ w("data/thematic/flight_profiles/repulsor.json", `{
   }
 }
 `);
-w("data/thematic/flight_profiles/jetpack.json", `{ "poses": { "style": "propelled", "armBack": 20 }, "effects": { "jets": [] } }\n`);
+w("data/thematic/flight_profiles/jetpack.json", `{ "poses": { "style": "propelled", "armBack": 20, "hoverIdle": "super.flight.idle", "loop": "super.flight.jetpack.fast" }, "effects": { "jets": [] } }\n`);
+// the two player clips the jetpack names: hovering swings the right leg back 60 degrees, fast flight swings both back 30
+w("assets/thematic/animations/armor/flight.animation.json", JSON.stringify({ format_version: "1.8.0", animations: {
+  "super.flight.idle": { loop: true, animation_length: 2, bones: { armorRightLeg: { rotation: [60, 0, 0] } } },
+  "super.flight.jetpack.fast": { loop: true, animation_length: 1, bones: { armorRightLeg: { rotation: [30, 0, 0] }, armorLeftLeg: { rotation: [30, 0, 0] } } },
+} }, null, 2) + "\n");
 const PALMS = w("data/thematic/flight_profiles/palms.json", `{
   "parent": "thematic:jetpack",
   "effects": {
@@ -109,7 +114,7 @@ const GUIDE = w("assets/thematic/guide/thematic/en_us/entries/suits/test_suit.js
   ]
 }
 `);
-const before = Object.fromEntries([SUIT, HUD, HIVE, GUIDE, PALMS, CHILD].map((f) => [f, fs.readFileSync(f, "utf8")]));
+const before = Object.fromEntries([SUIT, HUD, HIVE, GUIDE, PALMS, CHILD, REPULSOR].map((f) => [f, fs.readFileSync(f, "utf8")]));
 
 const app = await launch(proj);
 const rows = [];
@@ -403,6 +408,94 @@ try {
     await undo();
     const link = await E(`return !!document.querySelector('[data-testid=pack-editor] [data-testid=pe-edit-profile]')`);
     return { ok: f.join() === "DUELIST" && f2 && tier === 9 && (await text()) === t0 && link, note: JSON.stringify({ f, tier }) };
+  });
+
+
+  // ---- flight: jets follow the posed limbs, the pose source, new / switched profiles
+  const labPos = (label) => E(`const f = () => [...document.querySelectorAll('[data-testid=pack-editor] .pe-lab')].find((x) => x.textContent === ${JSON.stringify(label)}); await __qa.waitFor(f, 15000); await __qa.sleep(150); return f().dataset.pos.split(',').map(Number)`);
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const waitText = (frag) => E(`await __qa.waitFor(() => (__qa.editor()?.getModel()?.getValue() ?? '').includes(${JSON.stringify(frag)}), 15000); await __qa.sleep(500); return 1`);
+  let restFoot, propFoot, hoverFoot;
+  await check("F5 flight: a foot jet follows the leg - changing the leg tilt moves its marker", async () => {
+    await open(REPULSOR);
+    propFoot = await labPos("rightFoot");
+    await vecSet("pe-pose-legTilt", 1, 60);
+    const tilted = await labPos("rightFoot");
+    await undo();
+    const back = await labPos("rightFoot");
+    return { ok: dist(propFoot, tilted) > 1 && tilted[2] > propFoot[2] && dist(propFoot, back) < 0.01, note: JSON.stringify({ propFoot, tilted }) };
+  });
+  await check("F6 flight: pose source selector (hover / fast clip, propelled, rest); Rest and Propelled put the foot jet in different places", async () => {
+    const opts = await E(`return [...document.querySelectorAll('[data-testid=pe-pose-source] option')].map((o) => o.textContent)`);
+    const def = await E(`return document.querySelector('[data-testid=pe-pose-source]').value`);
+    await setSelect(`[data-testid=pe-pose-source]`, "rest");
+    restFoot = await labPos("rightFoot");
+    await setSelect(`[data-testid=pe-pose-source]`, "propelled");
+    const again = await labPos("rightFoot");
+    return { ok: opts.join() === "Hover clip,Fast clip,Propelled pose,Rest" && def === "propelled" && dist(restFoot, propFoot) > 0.3 && dist(again, propFoot) < 0.01, note: JSON.stringify({ opts, def, restFoot, propFoot }) };
+  });
+  await check("F7 flight: the hover clip (super.flight.idle, resolved through the parent chain) swings the foot jet with the leg; no note", async () => {
+    await setSelect(`[data-testid=pe-pose-source]`, "hover");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-clip-pause]'), 15000); return 1`);
+    await sleep(300);
+    hoverFoot = await labPos("rightFoot");
+    const note = await E(`return !!document.querySelector('[data-testid=pe-clip-note]')`);
+    const spd = await E(`return document.querySelector('[data-testid=pe-speed]').value`);
+    return { ok: !note && hoverFoot[2] - restFoot[2] > 8 && spd === "0", note: JSON.stringify({ hoverFoot, restFoot, spd }) };
+  });
+  await check("F8 flight: the fast clip (poses.loop) is another pose and sets the speed to full; pause stops the animation", async () => {
+    await setSelect(`[data-testid=pe-pose-source]`, "fast");
+    const spd = await E(`return document.querySelector('[data-testid=pe-speed]').value`);
+    const fastFoot = await labPos("rightFoot");
+    await clickSel(`[data-testid=pe-clip-pause]`);
+    const paused = await E(`return document.querySelector('[data-testid=pe-clip-pause]').checked`);
+    return { ok: spd === "1" && paused && fastFoot[2] - restFoot[2] > 3 && dist(fastFoot, hoverFoot) > 1, note: JSON.stringify({ spd, fastFoot }) };
+  });
+  await check("F9 flight: a clip id that does not resolve shows a note and falls back to rest", async () => {
+    await E(`const m = __qa.editor().getModel(); m.pushEditOperations([], [{ range: m.findMatches('"parent": "thematic:jetpack",', false, false, true, null, false)[0].range, text: '"parent": "thematic:jetpack", "poses": { "hoverIdle": "nope.clip" },' }], () => null); await __qa.sleep(600); return 1`);
+    await setSelect(`[data-testid=pe-pose-source]`, "hover");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-clip-note]'), 15000); await __qa.sleep(200); return 1`);
+    const note = await E(`return document.querySelector('[data-testid=pe-clip-note]')?.textContent ?? null`);
+    const foot = await labPos("rightFoot");
+    await E(`const m = __qa.editor().getModel(); m.pushEditOperations([], [{ range: m.findMatches(' "poses": { "hoverIdle": "nope.clip" },', false, false, true, null, false)[0].range, text: '' }], () => null); await __qa.sleep(500); return 1`);
+    return { ok: !!note && note.includes("nope.clip") && dist(foot, [restFoot[0], restFoot[1], restFoot[2]]) < 0.01 && (await text()) === before[REPULSOR], note: String(note) };
+  });
+  await check("F10 suit: New flight profile creates the file in the suit's pack, sets flight_profile (undoable) and opens it", async () => {
+    await open(SUIT);
+    await node("test_suit");
+    const picker = await E(`const s = document.querySelector('[data-testid=pe-flight-profile] select'); return [s.value, s.options.length]`);
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-new-profile]`);
+    const parent = await E(`return document.querySelector('[data-testid=pe-newfp-parent]').value`);
+    await setVal(`[data-testid=pe-newfp-id]`, "Bad-Id");
+    const bad = await E(`return [document.querySelector('[data-testid=pe-newfp-error]')?.textContent ?? '', document.querySelector('[data-testid=pe-newfp-create]').disabled]`);
+    await setVal(`[data-testid=pe-newfp-id]`, "repulsor");
+    const dup = await E(`return document.querySelector('[data-testid=pe-newfp-error]')?.textContent ?? ''`);
+    await setVal(`[data-testid=pe-newfp-id]`, "my_jet");
+    await clickSel(`[data-testid=pe-newfp-create]`);
+    const file = path.join(res, "data/thematic/flight_profiles/my_jet.json");
+    await waitText('"parent": "thematic:repulsor"');
+    const kind = await E(`return document.querySelector('[data-testid=pack-editor]').dataset.kind`);
+    const content = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+    await open(SUIT);
+    const set = JSON.parse(await text()).flight_profile;
+    await undo();
+    const undone = JSON.parse(await text()).flight_profile;
+    return { ok: parent === "thematic:repulsor" && /lowercase/.test(bad[0]) && bad[1] && /already exists/.test(dup) && kind === "flight" && content === '{\n  "parent": "thematic:repulsor"\n}\n' && set === "thematic:my_jet" && undone === "thematic:repulsor" && picker[1] >= 3, note: JSON.stringify({ parent, bad, dup, kind, content, set, undone, picker }) };
+  });
+  await check("F11 flight: the header switcher lists every profile (the new one too) and opens the one you pick; New child profile makes a child of it", async () => {
+    await open(path.join(res, "data/thematic/flight_profiles/my_jet.json"));
+    const opts = await E(`return [...document.querySelectorAll('[data-testid=pe-fp-switch] option')].map((o) => o.value)`);
+    await setSelect(`[data-testid=pe-fp-switch]`, "thematic:palms");
+    await E(`await __qa.waitFor(() => document.querySelector('[data-testid=pe-tree] .pe-tn .pe-tn-l')?.textContent === 'palms', 15000); return 1`);
+    const opened = (await text()) === before[PALMS];
+    await clickSel(`[data-testid=pack-editor] [data-testid=pe-fp-new]`);
+    const parent = await E(`return document.querySelector('[data-testid=pe-newfp-parent]').value`);
+    await setVal(`[data-testid=pe-newfp-id]`, "kid");
+    await clickSel(`[data-testid=pe-newfp-create]`);
+    await waitText('"parent": "thematic:palms"');
+    const kid = path.join(res, "data/thematic/flight_profiles/kid.json");
+    const label = await E(`return document.querySelector('[data-testid=pe-tree] .pe-tn .pe-tn-l')?.textContent`);
+    return { ok: ["thematic:repulsor", "thematic:jetpack", "thematic:palms", "thematic:child", "thematic:my_jet"].every((x) => opts.includes(x)) && opened && parent === "thematic:palms" && fs.existsSync(kid) && label === "kid", note: JSON.stringify({ opts, parent, label }) };
   });
 
   // ---- nothing reached disk unsaved

@@ -14,9 +14,10 @@ import { BEAM_DEFAULTS, BEAM_VISUALS, beamOf, readAttributes, readRenderSources,
 import { abilityPath, flightIdOf, loadCatalog, loadFlight, loadSuitModel, useAsync, type Flight } from "./data";
 import { openFlightProfile } from "./flightData";
 import { Docks, ParseError, type ViewProps } from "./PackView";
+import { NewFlightProfile, ProfileSelect } from "./NewFlightProfile";
 import { readText, resourceRoots } from "./resolve";
 import { AbilityList, AttributeTable, ChipSelect, ReadOnlyFields, StatTable } from "./suitLists";
-import { BoolField, ColorField, Empty, EnumField, NumberField, Section, SceneTree, TextField, Vec3Field, type TreeNode } from "./widgets";
+import { BoolField, ColorField, Empty, EnumField, NumberField, Row, Section, SceneTree, TextField, Vec3Field, type TreeNode } from "./widgets";
 import { Viewport3D, type Marker } from "./Viewport3D";
 
 interface AbilityInfo { id: string; path: string | null; sources: RenderSource[] }
@@ -47,7 +48,8 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   }, [roots, abilityIds], [] as AbilityInfo[]);
   const flightId = flightIdOf(suit?.flightProfile, suit?.flightType);
   const [flight] = useAsync(() => (roots.length ? loadFlight(host, roots, flightId) : Promise.resolve(null as Flight | null)), [roots, flightId], null as Flight | null);
-  const [catalog] = useAsync(() => (roots.length && pr ? loadCatalog(host, roots, pr.ns) : Promise.resolve(null as Catalog | null)), [roots], null as Catalog | null);
+  const [catVer, setCatVer] = useState(0); // bumped when a flight profile is created, to read the project's files again
+  const [catalog] = useAsync(() => (roots.length && pr ? loadCatalog(host, roots, pr.ns) : Promise.resolve(null as Catalog | null)), [roots, catVer], null as Catalog | null);
   const [sel, setSel] = useState<string | null>("suit");
   const drag = useRef<{ index: number; base: NumVec3 } | null>(null);
 
@@ -107,6 +109,11 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   const abSel = sel?.startsWith("ab:") ? Number(sel.slice(3)) : sel?.startsWith("src:") ? Number(sel.split(":")[1]) : -1;
   const abIndex = abSel < suit.abilities.length ? abSel : -1;
   const openProfile = () => void openFlightProfile(host, path, flightId);
+  const flightCtx: FlightCtx = {
+    host, path, ns: pr?.ns ?? "thematic", flightId,
+    // the new profile becomes this suit's (a normal undoable edit), then opens
+    onCreated: (id, file) => { edit((cur) => setTop(cur, "flight_profile", id)); setCatVer((n) => n + 1); void openFile({ host, path: file }); },
+  };
 
   const onDrag = (mid: string, delta: NumVec3, phase: "move" | "end") => {
     const [, ai] = mid.split(":").map(Number);
@@ -124,7 +131,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
   };
 
   const inspector = (() => {
-    if (sel === "suit") return <SuitInspector suit={suit} cat={cat} edit={edit} openProfile={openProfile} />;
+    if (sel === "suit") return <SuitInspector suit={suit} cat={cat} edit={edit} openProfile={openProfile} fc={flightCtx} />;
     if (sel === "abilities" && abIndex < 0) return <AbilitiesPanel suit={suit} catalog={catalog} selected={null} edit={edit} onSelect={setSel} />;
     if (sel === "stats") return (
       <>
@@ -145,7 +152,7 @@ export default function SuitView({ host, path, text, edit }: ViewProps) {
       const j = sel.startsWith("jet:") ? flight?.jets[Number(sel.slice(4))] : undefined;
       return (
         <>
-          <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} />
+          <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} fc={flightCtx} />
           <Section title={j ? `Jet · ${j.anchor}` : "Jets"}>
             <div className="pe-note">{flight?.path ? <>Jets come from <b>{flightId}</b>{flight.jets[0] && flight.jets[0].from !== flight.path ? " (inherited)" : ""}: every suit on that profile shares them.</> : `No flight profile ${flightId}.`}</div>
             {j && <div className="pe-kv"><span>when</span><b>{j.when ?? "fast"}</b><span>aim</span><b>{j.aim ?? "down"}</b></div>}
@@ -195,7 +202,7 @@ function AbilitiesPanel({ suit, catalog, selected, edit, onSelect }: { suit: Sui
   );
 }
 
-function SuitInspector({ suit, cat, edit, openProfile }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void }) {
+function SuitInspector({ suit, cat, edit, openProfile, fc }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void; fc: FlightCtx }) {
   const top = (key: string) => (v: unknown, live?: boolean) => edit((cur) => setTop(cur, key, v), live);
   const readOnly = Object.entries(suit.raw).filter(([k]) => !TOP_EDITED.includes(k));
   return (
@@ -211,7 +218,7 @@ function SuitInspector({ suit, cat, edit, openProfile }: { suit: Suit; cat: Cata
         <TextField label="Parent" value={suit.parent} mono placeholder="(none)" onChange={(v) => top("parent")(v.trim() || undefined)} doc="Makes this suit an alt (skin variant) of that suit" />
         <TextField label="Suit recipe" value={suit.suitRecipe} mono placeholder="(none)" onChange={(v) => top("suit-recipe")(v.trim() || undefined)} doc="The suit bench recipe, thematic:<recipe file name>" />
       </Section>
-      <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} />
+      <SuitFlight suit={suit} cat={cat} edit={edit} openProfile={openProfile} fc={fc} />
       <Section title="Other fields" open={false}>
         <ReadOnlyFields fields={readOnly} />
       </Section>
@@ -219,13 +226,19 @@ function SuitInspector({ suit, cat, edit, openProfile }: { suit: Suit; cat: Cata
   );
 }
 
-function SuitFlight({ suit, cat, edit, openProfile }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void }) {
+/** Where the suit's flight section creates a profile: the suit's file (its pack), the profile it flies now, and what to do once one exists. */
+interface FlightCtx { host: string; path: string; ns: string; flightId: string; onCreated: (id: string, file: string) => void }
+
+function SuitFlight({ suit, cat, edit, openProfile, fc }: { suit: Suit; cat: Catalog; edit: Edit; openProfile: () => void; fc: FlightCtx }) {
   const top = (key: string) => (v: unknown) => edit((cur) => setTop(cur, key, v));
   return (
     <Section title="Flight">
       <EnumField label="Flight type" value={suit.flightType} options={cat.flightTypes} allowEmpty="(default: NO_HANDS)" onChange={(v) => top("flight_type")(v)} />
-      <EnumField label="Profile" value={suit.flightProfile} options={cat.flightProfiles} allowEmpty="(from flight type)" onChange={(v) => top("flight_profile")(v)} testId="pe-flight-profile" />
+      <Row label="Profile" doc="Every flight profile in the project, built-ins included. Type in the search box to narrow a long list." testId="pe-flight-profile">
+        <ProfileSelect value={suit.flightProfile} options={cat.flightProfiles} allowEmpty="(from flight type)" onChange={(v) => top("flight_profile")(v)} testId="pe-flight-profile-select" />
+      </Row>
       <div className="pe-btns"><button className="pe-btn" data-testid="pe-edit-profile" onClick={openProfile}>Edit flight profile →</button></div>
+      <NewFlightProfile host={fc.host} path={fc.path} ns={fc.ns} profiles={cat.flightProfiles} parent={fc.flightId} testId="pe-new-profile" onCreated={fc.onCreated} />
       <EnumField label="Jet limbs" value={suit.jetGroups} options={cat.jetGroups} allowEmpty="(all jets)" onChange={(v) => top("jet_groups")(v)} />
     </Section>
   );

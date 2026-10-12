@@ -85,6 +85,8 @@ export const flightIdOf = (profile: string | undefined, type: string | undefined
 const at = (host: string, path: string): Location => ({ host, path });
 const SKIP_DIRS = new Set(["test", "tests", "build", "out", "run", "runs", "bin", "generated", "node_modules", "testpacks"]);
 const catalogCache = new Map<string, Promise<Catalog>>();
+/** Forget the scanned catalogs, so the next `loadCatalog` reads the files again (a file was just created). */
+export const clearCatalogCache = () => catalogCache.clear();
 
 /** Every file under `dir` whose name ends in one of `exts` (depth-limited; folders in SKIP_DIRS are not read). */
 async function filesUnder(host: string, dir: string, exts: string[], depth: number, out: Array<{ path: string }> = []): Promise<Array<{ path: string }>> {

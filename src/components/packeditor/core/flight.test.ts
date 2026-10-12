@@ -3,6 +3,7 @@ import type { NumVec3 } from "../../animstudio/core";
 import { JET_ANCHORS, jetAnchorFrame } from "./anchors";
 import {
   angleMatrix, angleToQuat, armPitchDegrees, baseAim, effectivePose, flameSize, jetFrame, legPitchDegrees, matrixAngle, offsetForDelta,
+  effectiveClips, flightIdProblem, newFlightProfileText, followLimb, followPlacement, limbMatrix, limbOf, limbRotation, restDelta,
   antiGravCones, flameCones, glowOn, overrideJets, setGlowEnabled, POSE_DEFAULTS, propelledPose, quatToAngle, setJetVec, setPoseValue, turnDir,
 } from "./flight";
 
@@ -187,5 +188,114 @@ describe("edits", () => {
     const out = overrideJets(base, [{ anchor: "rightFoot", when: "always" }]);
     expect(JSON.parse(out).effects.jets).toEqual([{ anchor: "rightFoot", when: "always" }]);
     expect(JSON.parse(out).parent).toBe("thematic:repulsor");
+  });
+});
+
+describe("jets that follow their limb", () => {
+  const leg = (x: number, y = 0, z = 0) => ({ armorRightLeg: { rotation: [x, y, z] as NumVec3 } });
+  const arm = (x: number, y = 0, z = 0) => ({ armorRightArm: { rotation: [x, y, z] as NumVec3 } });
+  const rightFoot: NumVec3 = [1.92, 0.864, 0]; // the rightFoot anchor in G = (right, up, forward), px
+  it("maps anchors to limbs; head and body have none", () => {
+    expect(["rightArm", "rightPalm", "leftArm", "leftPalm", "rightLeg", "rightFoot", "leftLeg", "leftFoot"].map(limbOf)).toEqual(["rightArm", "rightArm", "leftArm", "leftArm", "rightLeg", "rightLeg", "leftLeg", "leftLeg"]);
+    expect([limbOf("head"), limbOf("body"), limbOf("nope")]).toEqual([null, null, null]);
+  });
+  it("is the identity with zero angles or no pose", () => {
+    for (const pose of [null, undefined, {}, leg(0), arm(0, 0, 0)]) {
+      for (const a of JET_ANCHORS) close(followLimb(a, pose, [3, 5, 7], [0, -1, 0]).point, [3, 5, 7]);
+      close(followLimb("rightFoot", pose, [3, 5, 7], [0, -1, 0]).aim, [0, -1, 0]);
+    }
+    close(limbMatrix([0, 0, 0]).flat(), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  });
+  it("leaves head and body jets alone however the limbs are posed", () => {
+    const pose = { ...leg(40, 10, 5), ...arm(30, 20, 10), armorHead: { rotation: [20, 0, 0] as NumVec3 }, armorBody: { rotation: [10, 0, 0] as NumVec3 } };
+    for (const a of ["head", "body"]) expect(followLimb(a, pose, [1, 20, 2], [0, -1, 0])).toEqual({ point: [1, 20, 2], aim: [0, -1, 0] });
+  });
+  it("right leg xRot > 0 swings the foot backward (forward component negative) about the hip", () => {
+    const r = followLimb("rightFoot", leg(90), rightFoot, [0, -1, 0]);
+    expect(r.point[2]).toBeLessThan(0);
+    close(r.point, [1.92, 12, -(12 - 0.864)]); // the foot 11.136 below the hip swings to 11.136 behind it, at hip height
+    close(r.aim, [0, 0, -1]); // a downward flame now points backward
+  });
+  it("right arm zRot > 0 swings the hand out to the right", () => {
+    const hand = jetFrame(F("rightPalm"), "down").pos; // scene; G = (x, y, -z)
+    const r = followLimb("rightPalm", arm(0, 0, 90), [hand[0], hand[1], -hand[2]], [0, -1, 0]);
+    expect(r.point[0]).toBeGreaterThan(hand[0]);
+    close(r.aim, [1, 0, 0]);
+  });
+  it("is Rz Ry Rx (X applied first) and keeps lengths", () => {
+    const m = limbMatrix([90, 90, 90]); // +Z -> Rx -> -Y -> Ry -> -Y -> Rz -> +X
+    close([m[0][2], m[1][2], m[2][2]], [1, 0, 0]);
+    const v = followLimb("rightFoot", leg(33, 21, -17), [5, 3, 2], [0.6, -0.8, 0]);
+    expect(Math.hypot(...v.aim)).toBeCloseTo(1, 9);
+  });
+  it("matches the preview rig's own rotation (three.js Euler ZYX of (-x, -y, z) in the scene)", () => {
+    // RigView.setPose: rotation.set(-x, -y, +z, "ZYX") = Rz(z) Ry(-y) Rx(-x) on scene vectors; scene = G with forward negated
+    const rot: NumVec3 = [37, -22, 15];
+    const [x, y, z] = rot.map((a) => (a * Math.PI) / 180);
+    const rx = (a: number) => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]];
+    const ry = (a: number) => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]];
+    const rz = (a: number) => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]];
+    const mm = (a: number[][], b: number[][]) => a.map((r) => [0, 1, 2].map((j) => r[0] * b[0][j] + r[1] * b[1][j] + r[2] * b[2][j]));
+    const scene = mm(rz(z), mm(ry(-y), rx(-x)));
+    const v: NumVec3 = [0.3, -0.8, 0.52]; // G, from the hip
+    const viaG = followLimb("rightLeg", leg(...rot), [1.9 + v[0], 12 + v[1], v[2]], [0, 0, 0]).point;
+    const s = [v[0], v[1], -v[2]];
+    const viaScene = scene.map((r) => r[0] * s[0] + r[1] * s[1] + r[2] * s[2]);
+    close([viaG[0] - 1.9, viaG[1] - 12, -viaG[2]], viaScene);
+  });
+  it("moves the pivot by the part's position delta (file px [x, y, z] -> G (-x, y, -z))", () => {
+    const pose = { armorRightLeg: { rotation: [0, 0, 0] as NumVec3, position: [1, 2, 3] as NumVec3 } };
+    close(followLimb("rightFoot", pose, rightFoot, [0, -1, 0]).point, [rightFoot[0] - 1, rightFoot[1] + 2, rightFoot[2] - 3]);
+  });
+  it("followPlacement does the same in scene space", () => {
+    const base = jetFrame(F("rightFoot"), "down");
+    const p = followPlacement("rightFoot", leg(90), base);
+    close(p.pos, [1.92, 12, 11.136]); // scene Z is behind
+    close(p.dir, [0, 0, 1]);
+    expect(followPlacement("head", leg(90), base)).toBe(base);
+  });
+  it("a world drag lands as the inverse-rotated move in the limb's rest frame", () => {
+    const pose = leg(90);
+    close(restDelta("rightFoot", pose, [0, 0, 2]), [0, -2, 0]); // 2 px further back in the world is 2 px further down the leg in its rest frame
+    expect(restDelta("rightFoot", null, [1, 2, 3])).toEqual([1, 2, 3]);
+    // drag the posed marker, write the offset, and the marker lands where it was dragged
+    const frame = F("rightFoot");
+    const start: NumVec3 = [0, 0, -0.5];
+    const world0 = followPlacement("rightFoot", pose, jetFrame(frame, "down", start)).pos;
+    const delta: NumVec3 = [1, 2, -3];
+    const next = offsetForDelta(frame, start, restDelta("rightFoot", pose, delta));
+    const world1 = followPlacement("rightFoot", pose, jetFrame(frame, "down", next)).pos;
+    close(world1, [world0[0] + 1, world0[1] + 2, world0[2] - 3]);
+  });
+  it("the rotate gizmo's quaternion carries the limb, and turning it back writes the same angle", () => {
+    const R = limbRotation("rightFoot", leg(35, 10, -5));
+    const angle: NumVec3 = [20, -30, 12];
+    close(quatToAngle(angleToQuat(angle, R), R), angle, 1e-4);
+    close(quatToAngle(angleToQuat(angle)), angle, 1e-4);
+    expect(limbRotation("head", leg(35))).toBeNull();
+  });
+});
+
+describe("effectiveClips", () => {
+  it("takes the nearest profile that writes the key, and null clears it", () => {
+    const def = { hoverIdle: "super.flight.idle", loop: "super.flight.nohand.loop" };
+    const jetpack = { loop: "super.flight.jetpack.fast", intro: null };
+    expect(effectiveClips(undefined, [jetpack, def])).toEqual({ hoverIdle: "super.flight.idle", loop: "super.flight.jetpack.fast" });
+    expect(effectiveClips({ hoverIdle: null }, [jetpack, def])).toEqual({ hoverIdle: undefined, loop: "super.flight.jetpack.fast" });
+    expect(effectiveClips({ loop: "x" }, [])).toEqual({ hoverIdle: undefined, loop: "x" });
+  });
+});
+
+describe("new flight profile", () => {
+  it("validates the id: lowercase [a-z0-9_] and not taken (with or without a namespace)", () => {
+    const taken = ["thematic:repulsor", "jetpack"];
+    expect(flightIdProblem("my_jet2", taken)).toBeNull();
+    expect(flightIdProblem("", taken)).toMatch(/Enter/);
+    for (const bad of ["Upper", "a-b", "a b", "a:b", "é"]) expect(flightIdProblem(bad, taken)).toMatch(/lowercase/);
+    expect(flightIdProblem("repulsor", taken)).toMatch(/already exists/);
+    expect(flightIdProblem("jetpack", taken)).toMatch(/already exists/);
+  });
+  it("writes just the parent", () => {
+    expect(newFlightProfileText("thematic:repulsor")).toBe('{\n  "parent": "thematic:repulsor"\n}\n');
   });
 });

@@ -11,10 +11,11 @@
  *   - propelled pose: client/appearance/BipedGeoPoser.java `poseFlight` (~l.98), content/flight/FlightProfile.Poses
  *
  * ASSUMPTION (jet `offset` / `angle`): as implemented in the Thematic working tree at the time of writing, and still to be
- * confirmed by the Thematic session. `offset` is [right, up, forward] in model pixels in the *body frame* (the jet anchors
- * are fixed in the body frame, they do not follow the arm bones); `angle` is [pitch, yaw, roll] degrees that turn the aim
- * (after `aim` picked the base direction): roll first (up toward right), then pitch (forward toward down), then yaw (forward
- * toward right). If the confirmed semantics differ, only `jetFrame`, `turnDir` and the angle/quaternion pair change.
+ * confirmed by the Thematic session. `offset` is [right, up, forward] in model pixels, `angle` is [pitch, yaw, roll] degrees
+ * that turn the aim (after `aim` picked the base direction): roll first (up toward right), then pitch (forward toward down),
+ * then yaw (forward toward right). A jet anchored on a body (head / body) is fixed in the body frame; one anchored on a limb
+ * (arm, palm, leg, foot) is carried by that limb's live pose, so its offset and angle are relative to the limb (`followLimb`).
+ * If the confirmed semantics differ, only `jetFrame`, `turnDir`, `followLimb` and the angle/quaternion pair change.
  *
  * Scene space is the Studio's (anchors.ts): model pixels, +X the wearer's right, +Y up, -Z forward. The game's body frame is
  * (right, up, forward), so scene = (right, up, -forward).
@@ -91,7 +92,7 @@ export function offsetForDelta(anchor: JetAnchorFrame, start: NumVec3, delta: Nu
 
 // ---------------------------------------------------------------- angle <-> rotation (for the rotate gizmo)
 
-type M3 = [NumVec3, NumVec3, NumVec3];
+export type M3 = [NumVec3, NumVec3, NumVec3];
 
 /** The rotation `turnDir` applies, as a matrix on (right, up, forward): yaw * pitch * roll. */
 export function angleMatrix(angle: NumVec3): M3 {
@@ -139,10 +140,84 @@ function quatMat([x, y, z, w]: Quat): M3 {
   ];
 }
 
-/** The scene-space orientation (x, y, z, w) a rotate gizmo shows for `angle`. */
-export const angleToQuat = (angle: NumVec3): Quat => matQuat(refl(angleMatrix(angle)));
-/** The `angle` for a scene-space orientation the rotate gizmo ended on. */
-export const quatToAngle = (q: Quat): NumVec3 => matrixAngle(refl(quatMat(q)));
+/** The scene-space orientation (x, y, z, w) a rotate gizmo shows for `angle`; `limb` is the rotation of the limb carrying the jet (`limbRotation`). */
+export const angleToQuat = (angle: NumVec3, limb?: M3 | null): Quat => matQuat(refl(limb ? mul3(limb, angleMatrix(angle)) : angleMatrix(angle)));
+/** The `angle` for a scene-space orientation the rotate gizmo ended on (undoing the limb's rotation first). */
+export const quatToAngle = (q: Quat, limb?: M3 | null): NumVec3 => matrixAngle(limb ? mul3(tr3(limb), refl(quatMat(q))) : refl(quatMat(q)));
+
+// ---------------------------------------------------------------- jets that ride a limb
+
+export type Limb = "rightArm" | "leftArm" | "rightLeg" | "leftLeg";
+const LIMB_OF: Record<string, Limb> = { rightArm: "rightArm", rightPalm: "rightArm", leftArm: "leftArm", leftPalm: "leftArm", rightLeg: "rightLeg", rightFoot: "rightLeg", leftLeg: "leftLeg", leftFoot: "leftLeg" };
+/** The limb a jet anchor hangs from; head and body (and anything unknown) stay in the body frame. */
+export const limbOf = (anchor: string): Limb | null => LIMB_OF[anchor] ?? null;
+/** Rest pivots in the jet frame G = (right, up, forward), px, feet at y = 0: shoulders at (+-5, 22), hips at (+-1.9, 12). */
+export const LIMB_PIVOT: Record<Limb, NumVec3> = { rightArm: [5, 22, 0], leftArm: [-5, 22, 0], rightLeg: [1.9, 12, 0], leftLeg: [-1.9, 12, 0] };
+/** The preview Pose's bone of a limb (the armor bones of the geo file). */
+const limbBone = (l: Limb) => "armor" + l[0].toUpperCase() + l.slice(1);
+
+const mul3 = (a: M3, b: M3): M3 => a.map((r) => [0, 1, 2].map((j) => r[0] * b[0][j] + r[1] * b[1][j] + r[2] * b[2][j])) as M3;
+const tr3 = (m: M3): M3 => [0, 1, 2].map((j) => [m[0][j], m[1][j], m[2][j]]) as M3;
+const app3 = (m: M3, v: NumVec3): NumVec3 => [m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2], m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2], m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]];
+
+/**
+ * R = Rz(zRot) Ry(yRot) Rx(xRot) of a limb's file rotation [x, y, z] degrees, standard right-handed matrices applied in G.
+ * The file's limb angles ARE the game's vanilla ModelPart angles (GeckoLibSerializer.readCollection only negates the body, torso
+ * and head; poseFlight / thematic$propelledLimbs write the same numbers for the arms and legs), and vanilla's model frame is
+ * M = -G (x right to left, y up to down, z front to back), which cancels out of a rotation: G = -M so R_G = R_M.
+ * Checks: right leg xRot > 0 swings the foot backward, right arm zRot > 0 swings the hand out to the right.
+ */
+export function limbMatrix(rot: NumVec3): M3 {
+  const [x, y, z] = rot.map((a) => a * D2R);
+  const [cx, sx, cy, sy, cz, sz] = [Math.cos(x), Math.sin(x), Math.cos(y), Math.sin(y), Math.cos(z), Math.sin(z)];
+  const rx: M3 = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]];
+  const ry: M3 = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]];
+  const rz: M3 = [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]];
+  return mul3(rz, mul3(ry, rx));
+}
+
+/** How a pose moves a jet anchor's limb: `R` (G frame) about the rest pivot, and the pivot's own displacement `shift` (G px). Null: it stays put. */
+export interface LimbMove { R: M3; pivot: NumVec3; shift: NumVec3 }
+/**
+ * `pose` is the preview Pose (file convention: rotation degrees, position px). The pivot's displacement is the part's
+ * position delta: a file position [x, y, z] is the vanilla ModelPart delta (x, -y, z) (GeckoLibSerializer negates Y), and G = -M,
+ * so in G it is (-x, y, -z) px - the same move RigView.setPose makes in the scene.
+ */
+export function limbMove(anchor: string, pose: Pose | null | undefined): LimbMove | null {
+  const limb = limbOf(anchor);
+  const b = limb ? pose?.[limbBone(limb)] : undefined;
+  if (!limb || (!b?.rotation && !b?.position)) return null;
+  const p = b.position ?? ZERO;
+  return { R: limbMatrix(b.rotation ?? ZERO), pivot: LIMB_PIVOT[limb], shift: [-p[0], p[1], -p[2]] };
+}
+/** The limb's rotation alone (for the rotate gizmo); null when the jet does not ride a limb or the limb is not turned. */
+export const limbRotation = (anchor: string, pose: Pose | null | undefined): M3 | null => limbMove(anchor, pose)?.R ?? null;
+
+/**
+ * Carry a jet by its limb. `point` (px) and `aim` (unit) are in the jet frame G = (right, up, forward) at rest - anchor plus
+ * offset, and the base aim turned by `angle` - and come back as posedPivot + R (P - restPivot) and R aim.
+ */
+export function followLimb(anchor: string, pose: Pose | null | undefined, point: NumVec3, aim: NumVec3): { point: NumVec3; aim: NumVec3 } {
+  const m = limbMove(anchor, pose);
+  if (!m) return { point, aim };
+  const d = app3(m.R, [point[0] - m.pivot[0], point[1] - m.pivot[1], point[2] - m.pivot[2]]);
+  return { point: [m.pivot[0] + m.shift[0] + d[0], m.pivot[1] + m.shift[1] + d[1], m.pivot[2] + m.shift[2] + d[2]], aim: app3(m.R, aim) };
+}
+
+/** `followLimb` for a scene-space placement (scene = G with forward negated). */
+export function followPlacement(anchor: string, pose: Pose | null | undefined, p: JetPlacement): JetPlacement {
+  if (!limbMove(anchor, pose)) return p;
+  const r = followLimb(anchor, pose, [p.pos[0], p.pos[1], -p.pos[2]], [p.dir[0], p.dir[1], -p.dir[2]]);
+  return { pos: [r.point[0], r.point[1], -r.point[2]], dir: norm([r.aim[0], r.aim[1], -r.aim[2]]) };
+}
+
+/** A drag of `delta` scene px of a posed jet, as the same move in the limb's rest frame (inverse R), where `offset` is written. */
+export function restDelta(anchor: string, pose: Pose | null | undefined, delta: NumVec3): NumVec3 {
+  const R = limbRotation(anchor, pose);
+  if (!R) return delta;
+  const g = app3(tr3(R), [delta[0], delta[1], -delta[2]]);
+  return [g[0], g[1], -g[2]];
+}
 
 // ---------------------------------------------------------------- flame size
 
@@ -243,6 +318,30 @@ export function effectivePose(own: Record<string, unknown> | undefined, chain: A
   const style = [own, ...chain].find((c) => typeof c?.style === "string")?.style as string | undefined;
   return { values, inherited, style };
 }
+
+/**
+ * The player-animator clip ids a profile plays while hovering (`poses.hoverIdle`) and in fast flight (`poses.loop`): the nearest
+ * profile up the chain that writes the key wins, and an explicit null clears it (undefined here), like FlightInheritance.
+ */
+export function effectiveClips(own: Record<string, unknown> | undefined, chain: Array<Record<string, unknown> | undefined>): { hoverIdle?: string; loop?: string } {
+  const pick = (k: string) => {
+    const hit = [own, ...chain].find((c) => c && Object.prototype.hasOwnProperty.call(c, k));
+    const v = hit?.[k];
+    return typeof v === "string" && v ? v : undefined;
+  };
+  return { hoverIdle: pick("hoverIdle"), loop: pick("loop") };
+}
+
+/** What a new flight profile id needs: lowercase `a-z 0-9 _`, and a name no profile of the namespace has. Null when it is fine. */
+export function flightIdProblem(id: string, taken: readonly string[]): string | null {
+  if (!id) return "Enter an id.";
+  if (!/^[a-z0-9_]+$/.test(id)) return "Use lowercase letters, digits and _ only.";
+  if (taken.some((t) => (t.includes(":") ? t.slice(t.indexOf(":") + 1) : t) === id)) return `A flight profile named ${id} already exists.`;
+  return null;
+}
+
+/** The text of a new flight profile that only names its parent. */
+export const newFlightProfileText = (parent: string) => `{\n  "parent": ${JSON.stringify(parent)}\n}\n`;
 
 // ---------------------------------------------------------------- edits
 

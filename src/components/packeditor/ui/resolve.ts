@@ -43,7 +43,7 @@ export function resourceRoots(host: string, path: string): Promise<string[]> {
 }
 
 export async function exists(host: string, path: string): Promise<boolean> {
-  try { await fs.stat(at(host, path)); return true; } catch { return false; }
+  try { return (await fs.stat(at(host, path))).exists; } catch { return false; } // stat answers `exists: false` for a missing path, it does not throw
 }
 
 /** First root holding `rel` (e.g. `assets/thematic/geo/armor/iron_man.geo.json`). */
