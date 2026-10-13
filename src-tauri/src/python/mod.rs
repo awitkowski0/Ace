@@ -220,7 +220,9 @@ fn discover_local(root: &str) -> Vec<Interp> {
                     if let Some(v) = c.env_root.as_deref().and_then(|e| version_from_cfg(Path::new(e))) {
                         return Some(v);
                     }
-                    let o = std::process::Command::new(crate::platform::resolve_program(&c.path)).arg("--version").stdin(std::process::Stdio::null()).output().ok()?;
+                    let mut cmd = std::process::Command::new(crate::platform::resolve_program(&c.path));
+                    cmd.arg("--version").stdin(std::process::Stdio::null());
+                    let o = crate::platform::no_window(&mut cmd).output().ok()?;
                     parse_version(&String::from_utf8_lossy(&o.stdout)).or_else(|| parse_version(&String::from_utf8_lossy(&o.stderr)))
                 })
             })

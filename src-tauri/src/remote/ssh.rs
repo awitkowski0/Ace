@@ -32,6 +32,7 @@ pub fn command(host: &str, tty: bool) -> Command {
         c.args(["-o", "BatchMode=yes", "-T"]);
     }
     c.arg(host).arg("--");
+    crate::platform::no_window(&mut c);
     c
 }
 

@@ -18,13 +18,12 @@ const BASE_ARGS: [&str; 2] = ["-c", "core.quotepath=off"];
 
 fn run_raw(root: &Location, args: &[String], ok: &[i32]) -> Result<Vec<u8>, String> {
     let out = if root.is_local() {
-        Command::new("git")
-            .arg("-C").arg(&root.path)
+        let mut c = Command::new("git");
+        c.arg("-C").arg(&root.path)
             .args(BASE_ARGS).args(args)
             .env("GIT_TERMINAL_PROMPT", "0").env("GIT_OPTIONAL_LOCKS", "0").env("LC_ALL", "C")
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("git: {e}"))?
+            .stdin(Stdio::null());
+        crate::platform::no_window(&mut c).output().map_err(|e| format!("git: {e}"))?
     } else {
         ssh::exec(&root.host, &ssh::login_wrap(&remote_line(root, args)))?
     };
@@ -407,6 +406,7 @@ pub async fn git_stream(app: AppHandle, window: tauri::WebviewWindow, root: Loca
             c.arg(ssh::login_wrap(&remote_line(&root, &a)));
             c
         };
+        crate::platform::no_window(&mut cmd);
         let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("git: {e}"))?;
         let (so, se, pid) = (child.stdout.take(), child.stderr.take(), child.id());
         let child = Arc::new(Mutex::new(child));
@@ -709,9 +709,10 @@ pub async fn git_gh(root: Location, args: Vec<String>) -> Result<String, String>
     if !ok { return Err("unsupported gh command".into()); }
     blocking(move || {
         let out = if root.is_local() {
-            Command::new(gh_bin()).args(&args).current_dir(&root.path)
-                .env("GH_PROMPT_DISABLED", "1").env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null())
-                .output().map_err(|e| format!("gh: {e}"))?
+            let mut c = Command::new(gh_bin());
+            c.args(&args).current_dir(&root.path)
+                .env("GH_PROMPT_DISABLED", "1").env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null());
+            crate::platform::no_window(&mut c).output().map_err(|e| format!("gh: {e}"))?
         } else {
             let mut line = format!("cd {} && GH_PROMPT_DISABLED=1 gh", ssh::quote(&root.path));
             for a in &args { line.push(' '); line.push_str(&ssh::quote(a)); }

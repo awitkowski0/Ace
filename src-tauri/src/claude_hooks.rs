@@ -134,6 +134,9 @@ type Reader = BufReader<std::process::ChildStdout>;
 
 /// Run `sh -c script sh arg` locally or on `host` (through the multiplexed ssh connection), registered with procs for `label`.
 fn spawn_script(label: &str, host: &str, kind: &str, script: &str, arg: &str) -> Result<(ChildStdin, Reader, u64), String> {
+    if cfg!(windows) && host == "local" {
+        return Err("claude hooks are not available locally on Windows".into());
+    }
     let mut cmd = if host == "local" {
         let mut c = Command::new("sh");
         c.args(["-c", script, "sh", arg]);

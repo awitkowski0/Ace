@@ -13,6 +13,7 @@ use std::process::{Child, Command, Stdio};
 /// Spawn `cmd` and register it in the process registry with a kill-by-pid closure, so the caller keeps
 /// ownership of the `Child` (to read/write/wait) while app exit still kills it.
 pub fn spawn_tracked(mut cmd: Command, kind: &str, label: &str) -> Result<(Child, u64), String> {
+    crate::platform::no_window(&mut cmd);
     let child = cmd.spawn().map_err(|e| format!("{label}: {e}"))?;
     let pid = child.id();
     let id = procs::register_killer(
@@ -20,7 +21,9 @@ pub fn spawn_tracked(mut cmd: Command, kind: &str, label: &str) -> Result<(Child
         label,
         Some(pid),
         Box::new(move || {
-            let _ = Command::new("kill").arg(pid.to_string()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let mut k = Command::new("kill");
+            k.arg(pid.to_string()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            let _ = crate::platform::no_window(&mut k).status();
         }),
     );
     Ok((child, id))

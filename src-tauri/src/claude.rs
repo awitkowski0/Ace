@@ -470,6 +470,9 @@ fn local_recent(cwds: &[String]) -> HashMap<String, Vec<String>> {
 pub async fn claude_running(host: String) -> Result<Vec<RunningClaude>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if host == "local" || host.is_empty() {
+            if cfg!(windows) {
+                return Ok(Vec::new()); // no ps/lsof: nothing to scan
+            }
             let ps = std::process::Command::new("ps").args(["-axo", "pid=,comm=,args="]).output().map_err(|e| e.to_string())?;
             let ps = String::from_utf8_lossy(&ps.stdout).into_owned();
             let mut r = parse_ps(&ps, &HashMap::new());

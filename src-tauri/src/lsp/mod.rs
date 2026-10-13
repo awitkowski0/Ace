@@ -331,7 +331,9 @@ fn which(bin: &str) -> Option<PathBuf> {
         if bin != "rust-analyzer" {
             return None;
         }
-        let out = Command::new("rustup").arg("which").arg(bin).env("PATH", login_path()).stderr(Stdio::null()).output().ok()?;
+        let mut c = Command::new("rustup");
+        c.arg("which").arg(bin).env("PATH", login_path()).stderr(Stdio::null());
+        let out = crate::platform::no_window(&mut c).output().ok()?;
         let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
         (out.status.success() && p.is_file()).then_some(p)
     })
@@ -484,6 +486,7 @@ fn start_blocking(app: AppHandle, owner: String, server_id: String, root: String
         None => which(spec.bin).ok_or_else(|| format!("{} not found on PATH", spec.bin))?,
     };
     let mut cmd = Command::new(bin);
+    crate::platform::no_window(&mut cmd);
     let sep = if cfg!(windows) { ";" } else { ":" };
     let path = path_prepend.iter().map(|p| format!("{p}{sep}")).collect::<String>() + login_path();
     cmd.args(spec.args).env("PATH", path).current_dir(&root);
