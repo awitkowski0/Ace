@@ -279,6 +279,23 @@ exec "$G" -q --console=plain {off}--no-configuration-cache -Dorg.gradle.configur
     )
 }
 
+/// `dump_script` without a shell (local Windows): `gradlew.bat` of the build, else the root's, else `gradle` (the runner resolves gradle.bat).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn dump_argv(init: &str, file: &str, build: &Path, root: &Path, pin: Option<&str>, offline: bool) -> Vec<String> {
+    let g = [build, root].iter().map(|d| d.join("gradlew.bat")).find(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "gradle".into());
+    let mut v: Vec<String> = vec![g, "-q".into(), "--console=plain".into()];
+    if offline {
+        v.push("--offline".into());
+    }
+    v.extend(["--no-configuration-cache", "-Dorg.gradle.configureondemand=false", "--init-script", init].map(String::from));
+    v.push(format!("-Pace.file={file}"));
+    if let Some(p) = pin {
+        v.push(format!("-Pace.project={p}"));
+    }
+    v.push("aceDumpClasspath".into());
+    v
+}
+
 fn run_dump(owner: &str, build: &Path, root: &Path, file: &str, pin: Option<&str>, progress: &dyn Fn(&str)) -> Result<Value, String> {
     let dir = gradle_dir()?;
     let init = dir.join("ace-dump.gradle");
@@ -291,7 +308,8 @@ fn run_dump(owner: &str, build: &Path, root: &Path, file: &str, pin: Option<&str
         let sp = Spec {
             host: "local".into(),
             cwd: build.to_string_lossy().into_owned(),
-            shell: Some(dump_script(&init.to_string_lossy(), file, &root.to_string_lossy(), pin, offline)),
+            shell: (!cfg!(windows)).then(|| dump_script(&init.to_string_lossy(), file, &root.to_string_lossy(), pin, offline)),
+            argv: if cfg!(windows) { dump_argv(&init.to_string_lossy(), file, build, root, pin, offline) } else { Vec::new() },
             ..Default::default()
         };
         let o = runner::exec(owner, &sp, None, Duration::from_secs(20 * 60))?;

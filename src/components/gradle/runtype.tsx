@@ -4,6 +4,8 @@ import type { ConfigType, Mode, RunConfig } from "../run/types";
 import type { JavaDebugTarget } from "../run/hooks";
 import { envRecord, resolvePath, shellJoin, shellSplit } from "../run/util";
 import { projectStore } from "../../lib/project";
+import { fs } from "../../lib/ipc";
+import { isWindows } from "../../lib/platform";
 import { gradleApi } from "./api";
 import { gradleStore } from "./model";
 import { GradleIcon } from "./icons";
@@ -52,11 +54,19 @@ export const gradleType: ConfigType = {
       javaDebug = { kind: "java", host: root.host, cwd, port, title: String(cfg.name || cfg.tasks || "gradle"), initScript: prep.initScript, enhanced: enhanced && prep.jbrMajors.length > 0, note: prep.note };
     }
     const argv = ["--console=plain", ...dbgArgs, ...inits.flatMap((f) => ["--init-script", f]), ...words];
-    const a = shellJoin(argv);
-    // wrapper if present, else gradle from the login PATH; always the normal shared daemon (no --no-daemon, no --stop)
-    const shell = `if [ -x ./gradlew ]; then exec ./gradlew ${a}; else exec gradle ${a}; fi`;
+    // wrapper if present, else gradle from the login PATH; always the normal shared daemon (no --no-daemon, no --stop).
+    // Local Windows has no POSIX shell: exec gradlew.bat (else `gradle`, resolved to gradle.bat by the runner) directly.
+    let launch: { argv: string[] } | { shell: string };
+    if (isWindows && root.host === "local") {
+      const wrapper = `${cwd.replace(/[\\/]+$/, "")}/gradlew.bat`;
+      const st = await fs.stat({ host: "local", path: wrapper }).catch(() => null);
+      launch = { argv: [st?.isFile ? wrapper : "gradle", ...argv] };
+    } else {
+      const a = shellJoin(argv);
+      launch = { shell: `if [ -x ./gradlew ]; then exec ./gradlew ${a}; else exec gradle ${a}; fi` };
+    }
     return {
-      spec: { host: root.host, cwd, shell, env: envRecord(cfg.env) },
+      spec: { host: root.host, cwd, ...launch, env: envRecord(cfg.env) },
       title: String(cfg.tasks ?? "gradle"),
       commandLine: `$ ./gradlew ${shellJoin(words)}${javaDebug ? `   (debug: JDWP agent on 127.0.0.1:${javaDebug.port}${javaDebug.enhanced ? ", enhanced HotSwap" : ""})` : ""}`,
       javaDebug,

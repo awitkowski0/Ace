@@ -28,9 +28,9 @@ export interface BeamField {
   group: "shape" | "look" | "colour" | "more";
 }
 
-export const BEAM_STYLES = ["layered", "fan", "cylinder", "model", "filament", "lance", "cone", "waves"] as const;
+export const BEAM_STYLES = ["layered", "fan", "cylinder", "model", "filament", "lance", "cone", "waves", "flame"] as const;
 /** Blocks long when `length` is left out, by style (docs: "80 layered or fanned, 15 as a cylinder, 30 as a cone; a filament: ... 64"). */
-export const STYLE_LENGTH: Record<string, number> = { layered: 80, fan: 80, cylinder: 15, cone: 30, filament: 64, lance: 64 };
+export const STYLE_LENGTH: Record<string, number> = { layered: 80, fan: 80, cylinder: 15, cone: 30, flame: 12, filament: 64, lance: 64 };
 /** Anchors the docs call "the hands": a beam from them is a cylinder unless the style says otherwise. */
 const HAND_POINTS = new Set(["main_hand", "off_hand", "right_hand", "left_hand", "arm"]);
 
@@ -209,10 +209,12 @@ export function effectiveBeam(opts: Record<string, unknown>, suit: Record<string
   const opacity = pick("opacity", num, BEAM_DEFAULTS.thirdPersonOpacity);
   // scale is "the whole third-person beam, length and all"; a filament it only thickens
   const full = length.value * (style.value === "filament" || style.value === "lance" ? 1 : scale.value);
-  const radius = size.value * scale.value;
+  // a flame beam (BeamRenderer FLAME, JetFlameRenderer.renderBeamFlame) is one flame glow_size wide: its core cone is 0.45 of that
+  const flame = style.value === "flame";
+  const radius = (flame ? glowSize.value * 0.45 : size.value) * scale.value;
   return {
     style, scale, length, size, glowSize, count, spacing, coreColor, glowColor, opacity,
-    drawn: { radius, glow: (size.value + glowSize.value) * scale.value, length: Math.min(full, DRAW_CAP), full, cut: full > DRAW_CAP },
+    drawn: { radius, glow: (flame ? glowSize.value : size.value + glowSize.value) * scale.value, length: Math.min(full, DRAW_CAP), full, cut: full > DRAW_CAP },
   };
 }
 
